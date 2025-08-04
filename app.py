@@ -1,4 +1,6 @@
 import gradio as gr
+import urllib.request
+import os
 from functools import partial
 
 import pandas as pd
@@ -13,6 +15,19 @@ from dreams.utils.spectra import PeakListModifiedCosine
 from dreams.utils.data import MSData
 from dreams.api import dreams_embeddings
 from dreams.definitions import *
+
+
+def setup():    
+    # Download spectra library
+    os.makedirs('./DreaMS/data', exist_ok=True)
+    url = 'https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/MassSpecGym_DreaMS.hdf5'
+    target_path = './DreaMS/data/MassSpecGym_DreaMS.hdf5'
+    if not os.path.exists(target_path):
+        urllib.request.urlretrieve(url, target_path)
+
+    # Run simple example as a test and to download weights
+    embs = dreams_embeddings('DreaMS/data/examples/example_5_spectra.mgf')
+    print("Setup complete")
 
 
 def predict(lib_pth, in_pth):
@@ -80,6 +95,7 @@ def predict(lib_pth, in_pth):
     return df, str(df_path)
 
 
+setup()
 app = gr.Blocks(theme=gr.themes.Default(primary_hue="green", secondary_hue="pink"))
 with app:
 
