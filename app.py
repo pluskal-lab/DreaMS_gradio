@@ -18,15 +18,22 @@ from dreams.definitions import *
 
 
 def setup():    
-    # Download spectra library
-    os.makedirs('./DreaMS/data', exist_ok=True)
+    # Download spectral library
+    data_path = Path('./DreaMS/data')
+    data_path.mkdir(parents=True, exist_ok=True)
     url = 'https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/MassSpecGym_DreaMS.hdf5'
-    target_path = './DreaMS/data/MassSpecGym_DreaMS.hdf5'
-    if not os.path.exists(target_path):
+    target_path = data_path / 'MassSpecGym_DreaMS.hdf5'
+    if not target_path.exists():
         urllib.request.urlretrieve(url, target_path)
 
     # Run simple example as a test and to download weights
-    embs = dreams_embeddings('DreaMS/data/examples/example_5_spectra.mgf')
+    # Download example spectra file
+    example_url = 'https://raw.githubusercontent.com/pluskal-lab/DreaMS/cc806fa6fea281c1e57dd81fc512f71de9290017/data/examples/example_5_spectra.mgf'
+    example_path = Path('./data/example_5_spectra.mgf')
+    example_path.parent.mkdir(parents=True, exist_ok=True)
+    if not example_path.exists():
+        urllib.request.urlretrieve(example_url, example_path)
+    embs = dreams_embeddings(example_path)
     print("Setup complete")
 
 
