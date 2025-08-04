@@ -16,6 +16,7 @@ from dreams.definitions import *
 
 
 def predict(lib_pth, in_pth):
+    in_pth = Path(in_pth)
     # in_pth = Path('DreaMS/data/MSV000086206/peak/mzml/S_N1.mzML')  # Example dataset
     
     msdata_lib = MSData.load(lib_pth)

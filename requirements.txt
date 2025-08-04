@@ -1,1 +1,2 @@
-gradio
+dreams @ git+https://github.com//pluskal-lab/DreaMS.git@main
+# gradio
