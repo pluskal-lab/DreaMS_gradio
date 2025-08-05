@@ -27,7 +27,6 @@ def setup():
         urllib.request.urlretrieve(url, target_path)
 
     # Run simple example as a test and to download weights
-    # Download example spectra file
     example_url = 'https://raw.githubusercontent.com/pluskal-lab/DreaMS/cc806fa6fea281c1e57dd81fc512f71de9290017/data/examples/example_5_spectra.mgf'
     example_path = Path('./data/example_5_spectra.mgf')
     example_path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,25 +94,28 @@ def predict(lib_pth, in_pth):
     #     display(Chem.MolFromSmiles(row['library_SMILES']))
 
     # Sort hits by DreaMS similarity
-    # df_top1 = df[df['topk'] == 1].sort_values('DreaMS_similarity', ascending=False)
-    # df = df.set_index('feature_id').loc[df_top1['feature_id'].values].reset_index()
-    # df
+    df_top1 = df[df['topk'] == 1].sort_values('DreaMS_similarity', ascending=False)
+    df = df.set_index('feature_id').loc[df_top1['feature_id'].values].reset_index()
 
     return df, str(df_path)
 
 
 setup()
-app = gr.Blocks(theme=gr.themes.Default(primary_hue="green", secondary_hue="pink"))
+app = gr.Blocks(theme=gr.themes.Default(primary_hue="yellow", secondary_hue="pink"))
 with app:
 
     # Input GUI
+    # gr.Markdown(value="""# DreaMS""")
+    gr.Image("https://raw.githubusercontent.com/pluskal-lab/DreaMS/cc806fa6fea281c1e57dd81fc512f71de9290017/assets/dreams_background.png", label="DreaMS")
     gr.Markdown(value="""
-        # DreaMS
+        DreaMS (Deep Representations Empowering the Annotation of Mass Spectra) is a transformer-based
+         neural network designed to interpret tandem mass spectrometry (MS/MS) data. Pre-trained in a
+         self-supervised way on millions of unannotated spectra from our new GeMS (GNPS Experimental
+         Mass Spectra) dataset, DreaMS acquires rich molecular representations by predicting masked
+         spectral peaks and chromatographic retention orders. When fine-tuned for tasks such as spectral
+         similarity, chemical properties prediction, and fluorine detection, DreaMS achieves state-of-the-art
+         performance across various mass spectrometry interpretation tasks (<a href="https://www.nature.com/articles/s41587-025-02663-3">Bushuiev et al., Nature Biotechnology, 2025</a>).
     """)
-    # gr.Image("assets/readme-dimer-close-up.png")
-    # gr.Markdown(value="""
-    #     TODO Some description
-    # """)
     with gr.Row(equal_height=True):
         in_pth = gr.File(
             file_count="single",
@@ -132,18 +134,12 @@ with app:
         datatype=["number", "number", "number", "str", "str", "number", "number", "number", "number"],
         col_count=(9, "fixed"),
     )
-    # dropdown = gr.Dropdown(interactive=True, visible=False)
-    # dropdown_choices_to_plot_args = gr.State([])
-    # plot = gr.HTML()
 
     # Main logic
     inputs = [in_pth]
     outputs = [df, df_file]
     predict = partial(predict, lib_pth)
     predict_button.click(predict, inputs=inputs, outputs=outputs)
-
-    # Update plot on dropdown change
-    # dropdown.change(update_plot, inputs=[dropdown, dropdown_choices_to_plot_args], outputs=[plot])
 
 
 app.launch(allowed_paths=['./assets'])
