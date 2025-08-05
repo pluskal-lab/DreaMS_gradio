@@ -2,13 +2,18 @@ import gradio as gr
 import urllib.request
 import os
 from functools import partial
-
+import matplotlib.pyplot as plt
+import matplotlib
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from sklearn.metrics.pairwise import cosine_similarity
 from rdkit import Chem
+from rdkit.Chem import Draw
+from rdkit.Chem.Draw import rdMolDraw2D
+import base64
+from io import BytesIO
 import dreams.utils.spectra as su
 import dreams.utils.io as io
 from dreams.utils.spectra import PeakListModifiedCosine
@@ -17,7 +22,60 @@ from dreams.api import dreams_embeddings
 from dreams.definitions import *
 
 
-def setup():    
+def smiles_to_html_img(smiles, svg_size=1500):
+    """
+    Convert SMILES to HTML image string for display in Gradio dataframe
+    """
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return f"<div style='text-align: center; color: red;'>Invalid SMILES</div>"
+        
+        # Create SVG drawing
+        d2d = rdMolDraw2D.MolDraw2DSVG(svg_size, svg_size)
+        opts = d2d.drawOptions()
+        opts.clearBackground = False
+        d2d.DrawMolecule(mol)
+        d2d.FinishDrawing()
+        svg_str = d2d.GetDrawingText()
+        
+        # Convert to base64 for HTML embedding
+        buffered = BytesIO()
+        buffered.write(str.encode(svg_str))
+        img_str = base64.b64encode(buffered.getvalue())
+        img_str = f"data:image/svg+xml;base64,{repr(img_str)[2:-1]}"
+        
+        return f"<img src='{img_str}' style='width: {svg_size}px; height: {svg_size}px;' title='{smiles}' />"
+    except Exception as e:
+        return f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
+
+
+def spectrum_to_html_img(spec1, spec2, img_size=1500):
+    """
+    Convert spectrum plot to HTML image string for display in Gradio dataframe
+    """
+    try:
+        matplotlib.use('Agg')  # Use non-interactive backend
+        
+        # Create the plot using the existing function
+        su.plot_spectrum(spec=spec1, mirror_spec=spec2, figsize=(8, 4))
+        
+        # Save the current figure to a buffer
+        buffered = BytesIO()
+        plt.savefig(buffered, format='png', bbox_inches='tight', dpi=100)
+        buffered.seek(0)
+        img_str = base64.b64encode(buffered.getvalue())
+        img_str = f"data:image/png;base64,{repr(img_str)[2:-1]}"
+        
+        # Close the figure to free memory
+        plt.close()
+        
+        return f"<img src='{img_str}' style='width: {img_size}px; height: auto;' title='Spectrum comparison' />"
+    except Exception as e:
+        return f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
+
+
+def setup():
     # Download spectral library
     data_path = Path('./DreaMS/data')
     data_path.mkdir(parents=True, exist_ok=True)
@@ -38,7 +96,7 @@ def setup():
 
 def predict(lib_pth, in_pth):
     in_pth = Path(in_pth)
-    # in_pth = Path('DreaMS/data/MSV000086206/peak/mzml/S_N1.mzML')  # Example dataset
+    # # in_pth = Path('DreaMS/data/MSV000086206/peak/mzml/S_N1.mzML')  # Example dataset
     
     msdata_lib = MSData.load(lib_pth)
     embs_lib = msdata_lib[DREAMS_EMBEDDING]
@@ -60,17 +118,21 @@ def predict(lib_pth, in_pth):
     cos_sim = su.PeakListModifiedCosine()
     for i, topk in enumerate(tqdm(topk_cands)):
         for n, j in enumerate(topk):
+            smiles = msdata_lib.get_smiles(j)
+            spec1 = msdata.get_spectra(i)
+            spec2 = msdata_lib.get_spectra(j)
             df.append({
                 'feature_id': i + 1,
                 'topk': n + 1,
                 'library_j': j,
-                'library_SMILES': msdata_lib.get_smiles(j),
+                'library_SMILES': smiles_to_html_img(smiles),
+                'Spectrum': spectrum_to_html_img(spec1, spec2),
                 'library_ID': msdata_lib.get_values('IDENTIFIER', j),
                 'DreaMS_similarity': sims[i, j],
                 'Modified_cosine_similarity': cos_sim(
-                    spec1=msdata.get_spectra(i),
+                    spec1=spec1,
                     prec_mz1=msdata.get_prec_mzs(i),
-                    spec2=msdata_lib.get_spectra(j),
+                    spec2=spec2,
                     prec_mz2=msdata_lib.get_prec_mzs(j),
                 ),
                 'i': i,
@@ -78,7 +140,7 @@ def predict(lib_pth, in_pth):
             })
     df = pd.DataFrame(df)
 
-    # TODO Add some (random) name to the output file
+    # # TODO Add some (random) name to the output file
     df_path = io.append_to_stem(in_pth, 'MassSpecGym_hits').with_suffix('.csv')
     df.to_csv(df_path, index=False)
 
@@ -119,9 +181,18 @@ with app:
     with gr.Row(equal_height=True):
         in_pth = gr.File(
             file_count="single",
-            label=".mzML file (TODO Extend to other formats)"
+            label=".mzML file (TODO Extend to other formats)",
         )
     lib_pth = Path('DreaMS/data/MassSpecGym_DreaMS.hdf5')  # MassSpecGym library
+    examples = gr.Examples(
+        examples=["./data/S_N1.mzML", "./data/example_5_spectra.mgf"],
+        inputs=[in_pth],
+        label="Examples (click on a line to pre-fill the inputs)",
+        # TODO
+        # cache_examples=True
+        # outputs=[df, df_file],
+        # fn=predict,
+    )
 
     # Predict GUI
     predict_button = gr.Button(value="Run library matching", variant="primary")
@@ -130,9 +201,16 @@ with app:
     gr.Markdown("## Predictions")
     df_file = gr.File(label="Download predictions as .csv", interactive=False, visible=True)
     df = gr.Dataframe(
-        headers=["feature_id", "topk", "library_j", "library_SMILES", "library_ID", "DreaMS_similarity", "Modified_cosine_similarity", "i", "j"],
-        datatype=["number", "number", "number", "str", "str", "number", "number", "number", "number"],
-        col_count=(9, "fixed"),
+        headers=["feature_id", "topk", "library_j", "library_SMILES", "Spectrum", "library_ID", "DreaMS_similarity", "Modified_cosine_similarity", "i", "j"],
+        datatype=["number", "number", "number", "html", "html", "str", "number", "number", "number", "number"],
+        col_count=(10, "fixed"),
+        wrap=True,
+        column_widths=["80px", "60px", "80px", "400px", "800px", "120px", "120px", "150px", "60px", "60px"],
+        max_height=1000,
+        show_fullscreen_button=True,
+        show_row_numbers=True,
+        show_search='filter',
+        # pinned_columns=  # TODO
     )
 
     # Main logic
