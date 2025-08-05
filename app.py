@@ -150,7 +150,7 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
     progress(0.1, desc="Loading spectra data...")
     msdata = MSData.load(in_pth)
     
-    progress(0.2, desc="Computing spectra embeddings with DreaMS...")
+    progress(0.2, desc="Computing DreaMS embeddings...")
     embs = dreams_embeddings(msdata)
     print('Shape of the query embeddings:', embs.shape)
 
@@ -185,7 +185,7 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
                 'library_SMILES': smiles_to_html_img(smiles),
                 'library_SMILES_raw': smiles,
                 'Spectrum': spectrum_to_html_img(spec1, spec2),
-                'Spectrum_raw': spec1,
+                'Spectrum_raw': su.unpad_peak_list(spec1),
                 'library_ID': msdata_lib.get_values('IDENTIFIER', j),
                 'DreaMS_similarity': sims[i, j],
                 'Modified_cosine_similarity': cos_sim(
@@ -196,7 +196,7 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
                 ),
                 'i': i,
                 'j': j,
-                'DreaMS_embedding': ' '.join(embs[i].astype(str)),
+                'DreaMS_embedding': embs[i],
             })
     df = pd.DataFrame(df)
 
@@ -207,9 +207,9 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
     progress(0.9, desc="Post-processing results...")
     # Remove unnecessary columns and round similarity scores
     df = df.drop(columns=['i', 'j', 'library_j'])
-    df['DreaMS_similarity'] = df['DreaMS_similarity'].round(4)
-    df['Modified_cosine_similarity'] = df['Modified_cosine_similarity'].round(4)
-    df['precursor_mz'] = df['precursor_mz'].round(4)
+    df['DreaMS_similarity'] = df['DreaMS_similarity'].astype(float).round(4)
+    df['Modified_cosine_similarity'] = df['Modified_cosine_similarity'].astype(float).round(4)
+    df['precursor_mz'] = df['precursor_mz'].astype(float).round(4)
     # df['RT'] = df['RT'].round(1)
     df = df.rename(columns={
         'topk': 'Top k',
@@ -229,7 +229,8 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
     progress(0.95, desc="Saving results to CSV...")
     # Save full df to .csv
     df_path = dio.append_to_stem(in_pth, f"MassSpecGym_hits_{datetime.now().strftime('%Y%m%d_%H%M%S')}").with_suffix('.csv')
-    df.to_csv(df_path, index=False)
+    df_to_save = df.drop(columns=['Molecule', 'Spectrum', 'Top k'])
+    df_to_save.to_csv(df_path, index=False)
 
     progress(0.98, desc="Filtering and sorting results...")
     # Postprocess to only show most relevant hits
