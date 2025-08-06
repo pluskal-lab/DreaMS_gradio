@@ -122,8 +122,10 @@ def setup():
         urllib.request.urlretrieve(url, target_path)
 
     # Download example file
-    example_url = 'https://huggingface.co/datasets/titodamiani/PiperNET/resolve/main/lcms/rawfiles/202312_147_P55-Leaf-r2_1uL.mzML'
-    example_path = Path('./data/202312_147_P55-Leaf-r2_1uL.mzML')
+    # example_url = 'https://huggingface.co/datasets/titodamiani/PiperNET/resolve/main/lcms/rawfiles/202312_147_P55-Leaf-r2_1uL.mzML'
+    # example_path = Path('./data/202312_147_P55-Leaf-r2_1uL.mzML')
+    example_url = 'https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/example_piper_2k_spectra.mgf'
+    example_path = Path('./data/example_piper_2k_spectra.mgf')
     example_path.parent.mkdir(parents=True, exist_ok=True)
     if not example_path.exists():
         urllib.request.urlretrieve(example_url, example_path)
@@ -288,8 +290,7 @@ with app:
         )
     lib_pth = Path('DreaMS/data/MassSpecGym_DreaMS.hdf5')  # MassSpecGym library
     examples = gr.Examples(
-        examples=["./data/example_5_spectra.mgf", "./data/202312_147_P55-Leaf-r2_1uL.mzML"],
-        # examples=["./data/S_N1.mzML", "./data/example_5_spectra.mgf"],
+        examples=["./data/example_5_spectra.mgf", "./data/example_piper_2k_spectra.mgf"],
         inputs=[in_pth],
         label="Examples (click on a file to load as input)",
         # TODO
