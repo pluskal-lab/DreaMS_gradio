@@ -138,7 +138,8 @@ def setup():
     print("Setup complete")
 
 
-def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
+def _predict_core(lib_pth, in_pth, progress):
+    """Core prediction function without error handling"""
     in_pth = Path(in_pth)
     # # in_pth = Path('DreaMS/data/MSV000086206/peak/mzml/S_N1.mzML')  # Example dataset
     
@@ -239,15 +240,36 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
     df = df.drop(columns=['Top k'])
     df = df[df["DreaMS similarity"] >= 0.75]
     # Add row numbers as first column
-    df.insert(0, 'Row', range(len(df)))
+    df.insert(0, 'Row', range(1, len(df) + 1))
     
     progress(1.0, desc=f"Predictions complete! Found {len(df)} high-confidence matches.")
 
     return df, str(df_path)
 
 
+def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
+    """Wrapper function with error handling"""
+    try:
+        return _predict_core(lib_pth, in_pth, progress)
+    except Exception as e:
+        raise gr.Error(e)
+
+
+# Set up
 setup()
-app = gr.Blocks(theme=gr.themes.Default(primary_hue="yellow", secondary_hue="pink"))
+
+# Start the Gradio app
+js_func = """
+function refresh() {
+    const url = new URL(window.location);
+
+    if (url.searchParams.get('__theme') !== 'light') {
+        url.searchParams.set('__theme', 'light');
+        window.location.href = url.href;
+    }
+}
+"""
+app = gr.Blocks(theme=gr.themes.Default(primary_hue="yellow", secondary_hue="pink"), js=js_func)
 with app:
 
     # Input GUI
