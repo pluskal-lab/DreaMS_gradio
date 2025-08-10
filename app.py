@@ -36,9 +36,9 @@ from dreams.definitions import *
 # CONSTANTS AND CONFIGURATION
 # =============================================================================
 
-# Default image sizes for different components
-SMILES_IMG_SIZE = 200
-SPECTRUM_IMG_SIZE = 1500
+# Optimized image sizes for better performance
+SMILES_IMG_SIZE = 120  # Reduced from 200 for faster rendering
+SPECTRUM_IMG_SIZE = 800  # Reduced from 1500 for faster generation
 
 # Library and data paths
 LIBRARY_PATH = Path('DreaMS/data/MassSpecGym_DreaMS.hdf5')
@@ -47,6 +47,15 @@ EXAMPLE_PATH = Path('./data')
 
 # Similarity threshold for filtering results
 SIMILARITY_THRESHOLD = 0.75
+
+# Cache for SMILES images to avoid regeneration
+_smiles_cache = {}
+
+def clear_smiles_cache():
+    """Clear the SMILES image cache to free memory"""
+    global _smiles_cache
+    _smiles_cache.clear()
+    print("SMILES image cache cleared")
 
 # =============================================================================
 # UTILITY FUNCTIONS FOR IMAGE CONVERSION
@@ -83,7 +92,7 @@ def _convert_pil_to_base64(img, format='PNG'):
         str: Base64 encoded image string
     """
     buffered = io.BytesIO()
-    img.save(buffered, format=format)
+    img.save(buffered, format=format, optimize=True)  # Added optimize=True
     img_str = base64.b64encode(buffered.getvalue())
     return f"data:image/{format.lower()};base64,{repr(img_str)[2:-1]}"
 
@@ -114,6 +123,7 @@ def _crop_transparent_edges(img):
 def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
     """
     Convert SMILES string to HTML image for display in Gradio dataframe
+    Uses caching to avoid regenerating the same molecule images
     
     Args:
         smiles: SMILES string representation of molecule
@@ -122,18 +132,25 @@ def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
     Returns:
         str: HTML img tag with base64 encoded image
     """
+    # Check cache first
+    cache_key = f"{smiles}_{img_size}"
+    if cache_key in _smiles_cache:
+        return _smiles_cache[cache_key]
+    
     try:
         # Parse SMILES to RDKit molecule
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            return f"<div style='text-align: center; color: red;'>Invalid SMILES</div>"
+            result = f"<div style='text-align: center; color: red;'>Invalid SMILES</div>"
+            _smiles_cache[cache_key] = result
+            return result
         
         # Create PNG drawing with Cairo backend for better control
         d2d = rdMolDraw2D.MolDraw2DCairo(img_size, img_size)
         opts = d2d.drawOptions()
         opts.clearBackground = False
         opts.padding = 0.05  # Minimal padding
-        opts.bondLineWidth = 2.0  # Make bonds more visible
+        opts.bondLineWidth = 1.5  # Reduced from 2.0 for smaller images
         
         # Draw the molecule
         d2d.DrawMolecule(mol)
@@ -147,15 +164,22 @@ def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
         img = _crop_transparent_edges(img)
         img_str = _convert_pil_to_base64(img)
         
-        return f"<img src='{img_str}' style='max-width: 100%; height: auto;' title='{smiles}' />"
+        result = f"<img src='{img_str}' style='max-width: 100%; height: auto;' title='{smiles}' />"
+        
+        # Cache the result
+        _smiles_cache[cache_key] = result
+        return result
         
     except Exception as e:
-        return f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
+        result = f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
+        _smiles_cache[cache_key] = result
+        return result
 
 
 def spectrum_to_html_img(spec1, spec2, img_size=SPECTRUM_IMG_SIZE):
     """
     Convert spectrum plot to HTML image for display in Gradio dataframe
+    Optimized version based on working code
     
     Args:
         spec1: First spectrum data
@@ -170,11 +194,11 @@ def spectrum_to_html_img(spec1, spec2, img_size=SPECTRUM_IMG_SIZE):
         matplotlib.use('Agg')
         
         # Create the spectrum plot using DreaMS utility function
-        su.plot_spectrum(spec=spec1, mirror_spec=spec2, figsize=(2, 1))
+        su.plot_spectrum(spec=spec1, mirror_spec=spec2, figsize=(1.6, 0.8))  # Reduced size for performance
         
         # Save figure to buffer with transparent background
         buffered = BytesIO()
-        plt.savefig(buffered, format='png', bbox_inches='tight', dpi=100, transparent=True)
+        plt.savefig(buffered, format='png', bbox_inches='tight', dpi=80, transparent=True)
         buffered.seek(0)
         
         # Convert to PIL Image, crop edges, and convert to base64
@@ -225,6 +249,9 @@ def setup():
     print("=" * 60)
     print("Setting up DreaMS application...")
     print("=" * 60)
+    
+    # Clear any existing cache
+    clear_smiles_cache()
     
     try:
         # Download spectral library
@@ -396,6 +423,9 @@ def _predict_core(lib_pth, in_pth, progress):
     """
     in_pth = Path(in_pth)
     
+    # Clear cache at start to prevent memory buildup
+    clear_smiles_cache()
+    
     # Load library data
     progress(0, desc="Loading library data...")
     msdata_lib = MSData.load(lib_pth)
@@ -431,6 +461,10 @@ def _predict_core(lib_pth, in_pth, progress):
         for n, j in enumerate(topk):
             row_data = _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs)
             df.append(row_data)
+        
+        # Clear cache every 100 spectra to prevent memory buildup
+        if (i + 1) % 100 == 0:
+            clear_smiles_cache()
     
     df = pd.DataFrame(df)
     
