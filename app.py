@@ -141,12 +141,11 @@ def setup():
     print("Setup complete")
 
 
-@spaces.GPU
 def _predict_gpu(msdata):
     embs = dreams_embeddings(msdata)
     return embs
 
-
+@spaces.GPU
 def _predict_core(lib_pth, in_pth, progress):
     """Core prediction function without error handling"""
     in_pth = Path(in_pth)
