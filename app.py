@@ -1,4 +1,5 @@
 import gradio as gr
+import spaces
 import urllib.request
 import os
 from datetime import datetime
@@ -140,6 +141,12 @@ def setup():
     print("Setup complete")
 
 
+@spaces.GPU
+def _predict_gpu(msdata):
+    embs = dreams_embeddings(msdata)
+    return embs
+
+
 def _predict_core(lib_pth, in_pth, progress):
     """Core prediction function without error handling"""
     in_pth = Path(in_pth)
@@ -154,7 +161,7 @@ def _predict_core(lib_pth, in_pth, progress):
     msdata = MSData.load(in_pth)
     
     progress(0.2, desc="Computing DreaMS embeddings...")
-    embs = dreams_embeddings(msdata)
+    embs = _predict_gpu(msdata)
     print('Shape of the query embeddings:', embs.shape)
 
     progress(0.4, desc="Computing similarity matrix...")
@@ -293,10 +300,6 @@ with app:
         examples=["./data/example_5_spectra.mgf", "./data/example_piper_2k_spectra.mgf"],
         inputs=[in_pth],
         label="Examples (click on a file to load as input)",
-        # TODO
-        # cache_examples=True
-        # outputs=[df, df_file],
-        # fn=predict,
     )
 
     # Predict GUI
@@ -315,7 +318,6 @@ with app:
         show_fullscreen_button=True,
         show_row_numbers=False,
         show_search='filter',
-        # pinned_columns=  # TODO
     )
 
     # Main logic
