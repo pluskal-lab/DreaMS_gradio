@@ -143,17 +143,6 @@ def setup():
 
 @spaces.GPU
 def _predict_gpu(in_pth, progress):
-    # Check GPU availability and print details
-    print("\nGPU Information:")
-    print(f"CUDA Available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"Current Device: {torch.cuda.current_device()}")
-        print(f"Device Name: {torch.cuda.get_device_name()}")
-        print(f"Device Count: {torch.cuda.device_count()}")
-        print(f"Memory Allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB")
-        print(f"Memory Reserved: {torch.cuda.memory_reserved()/1024**2:.2f} MB\n")
-    else:
-        print("No GPU available")
     progress(0.1, desc="Loading spectra data...")
     msdata = MSData.load(in_pth)
     progress(0.2, desc="Computing DreaMS embeddings...")
