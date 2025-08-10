@@ -182,6 +182,8 @@ def _predict_core(lib_pth, in_pth, progress):
     topk_cands = np.argsort(sims, axis=1)[:, -k:][:, ::-1]
     topk_cands.shape
 
+    # TODO This is loaded for the 2nd time here, otpimize
+    msdata = MSData.load(in_pth)
     print(msdata.columns())
 
     # Construct a DataFrame with the top-k candidates for each spectrum and their corresponding similarities
