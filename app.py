@@ -1,7 +1,7 @@
 import gradio as gr
 import spaces
 import urllib.request
-import os
+import torch
 from datetime import datetime
 from functools import partial
 import matplotlib.pyplot as plt
@@ -141,11 +141,27 @@ def setup():
     print("Setup complete")
 
 
-def _predict_gpu(msdata):
+@spaces.GPU
+def _predict_gpu(in_pth, progress):
+    # Check GPU availability and print details
+    print("\nGPU Information:")
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"Current Device: {torch.cuda.current_device()}")
+        print(f"Device Name: {torch.cuda.get_device_name()}")
+        print(f"Device Count: {torch.cuda.device_count()}")
+        print(f"Memory Allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB")
+        print(f"Memory Reserved: {torch.cuda.memory_reserved()/1024**2:.2f} MB\n")
+    else:
+        print("No GPU available")
+    progress(0.1, desc="Loading spectra data...")
+    msdata = MSData.load(in_pth)
+    progress(0.2, desc="Computing DreaMS embeddings...")
     embs = dreams_embeddings(msdata)
+    print('Shape of the query embeddings:', embs.shape)
     return embs
 
-@spaces.GPU
+
 def _predict_core(lib_pth, in_pth, progress):
     """Core prediction function without error handling"""
     in_pth = Path(in_pth)
@@ -155,13 +171,8 @@ def _predict_core(lib_pth, in_pth, progress):
     msdata_lib = MSData.load(lib_pth)
     embs_lib = msdata_lib[DREAMS_EMBEDDING]
     print('Shape of the library embeddings:', embs_lib.shape)
-
-    progress(0.1, desc="Loading spectra data...")
-    msdata = MSData.load(in_pth)
     
-    progress(0.2, desc="Computing DreaMS embeddings...")
-    embs = _predict_gpu(msdata)
-    print('Shape of the query embeddings:', embs.shape)
+    embs = _predict_gpu(in_pth, progress)
 
     progress(0.4, desc="Computing similarity matrix...")
     sims = cosine_similarity(embs, embs_lib)
