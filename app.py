@@ -343,9 +343,9 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
         'precursor_mz': msdata.get_prec_mzs(i),
         'topk': n + 1,
         'library_j': j,
-        'library_SMILES': smiles_to_html_img(smiles) if dreams_similarity >= SIMILARITY_THRESHOLD else None,
+        'library_SMILES': smiles_to_html_img(smiles) if dreams_similarity > SIMILARITY_THRESHOLD else None,
         'library_SMILES_raw': smiles,
-        'Spectrum': spectrum_to_html_img(spec1, spec2) if dreams_similarity >= SIMILARITY_THRESHOLD else None,
+        'Spectrum': spectrum_to_html_img(spec1, spec2) if dreams_similarity > SIMILARITY_THRESHOLD else None,
         'Spectrum_raw': su.unpad_peak_list(spec1),
         'library_ID': msdata_lib.get_values('IDENTIFIER', j),
         'DreaMS_similarity': dreams_similarity,
@@ -423,7 +423,7 @@ def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
     df = df.drop(columns=['DreaMS embedding', "SMILES", "Input Spectrum"])
     df = df[df['Top k'] == 1].sort_values('DreaMS similarity', ascending=False)
     df = df.drop(columns=['Top k'])
-    df = df[df["DreaMS similarity"] >= SIMILARITY_THRESHOLD]
+    df = df[df["DreaMS similarity"] > SIMILARITY_THRESHOLD]
     
     # Add row numbers
     df.insert(0, 'Row', range(1, len(df) + 1))
