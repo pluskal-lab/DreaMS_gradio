@@ -1,7 +1,7 @@
 ---
 title: DreaMS
 emoji: 🔬
-colorFrom: blue
+colorFrom: yellow
 colorTo: pink
 sdk: gradio
 app_file: app.py
@@ -11,11 +11,11 @@ python_version: 3.11
 
 ## Usage
 
-This repository provides source code for the DreaMS Gradio app. The app is currently hosted here: [https://huggingface.co/spaces/anton-bushuiev/DreaMS](https://huggingface.co/spaces/anton-bushuiev/DreaMS).
+This repository provides the source code for the DreaMS Gradio app. The app is currently hosted here: [https://huggingface.co/spaces/anton-bushuiev/DreaMS](https://huggingface.co/spaces/anton-bushuiev/DreaMS).
 
 ## Development
 
-To run or debug the app locally, you can use the following command:
+To run or debug the app locally, you can use the following commands:
 
 ```bash
 git clone git@github.com:pluskal-lab/DreaMS_gradio.git
