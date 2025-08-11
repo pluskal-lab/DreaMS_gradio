@@ -333,18 +333,20 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
     spec1 = msdata.get_spectra(i)
     spec2 = msdata_lib.get_spectra(j)
     
+    dreams_similarity = sims[i, j]
+    
     # Base row data
     row_data = {
         'feature_id': i + 1,
         'precursor_mz': msdata.get_prec_mzs(i),
         'topk': n + 1,
         'library_j': j,
-        'library_SMILES': smiles_to_html_img(smiles),
+        'library_SMILES': smiles_to_html_img(smiles) if dreams_similarity >= SIMILARITY_THRESHOLD else None,
         'library_SMILES_raw': smiles,
-        'Spectrum': spectrum_to_html_img(spec1, spec2),
+        'Spectrum': spectrum_to_html_img(spec1, spec2) if dreams_similarity >= SIMILARITY_THRESHOLD else None,
         'Spectrum_raw': su.unpad_peak_list(spec1),
         'library_ID': msdata_lib.get_values('IDENTIFIER', j),
-        'DreaMS_similarity': sims[i, j],
+        'DreaMS_similarity': dreams_similarity,
         'i': i,
         'j': j,
         'DreaMS_embedding': embs[i],
@@ -453,7 +455,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
     try:
         # Load library data
         progress(0.1, desc="Loading library data...")
-        msdata_lib = MSData.load(temp_lib_path)
+        msdata_lib = MSData.load(temp_lib_path, in_mem=True)
         embs_lib = msdata_lib[DREAMS_EMBEDDING]
         print(f'Shape of the library embeddings: {embs_lib.shape}')
         
@@ -470,7 +472,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
         topk_cands = np.argsort(sims, axis=1)[:, -k:][:, ::-1]
         
         # Load query data for processing
-        msdata = MSData.load(in_pth)
+        msdata = MSData.load(in_pth, in_mem=True)
         print(f'Available columns: {msdata.columns()}')
         
         # Construct results DataFrame
@@ -611,7 +613,7 @@ def _create_gradio_interface():
             calculate_modified_cosine = gr.Checkbox(
                 label="Calculate modified cosine similarity",
                 value=False,
-                info="Enable to calculate traditional modified cosine similarity scores (slower)"
+                info="Enable to also calculate traditional modified cosine similarity scores (a bit slower)"
             )
         
         # Prediction button
