@@ -593,7 +593,7 @@ def _create_gradio_interface():
             DreaMS (Deep Representations Empowering the Annotation of Mass Spectra) is a transformer-based
              neural network designed to interpret tandem mass spectrometry (MS/MS) data (<a href="https://www.nature.com/articles/s41587-025-02663-3">Bushuiev et al., Nature Biotechnology, 2025</a>).
              This website provides an easy access to perform library matching with DreaMS against the <a href="https://huggingface.co/datasets/roman-bushuiev/MassSpecGym">MassSpecGym</a> spectral library (combination of GNPS, MoNA, and Pluskal lab data). Please upload
-             your MS/MS file and click on the "Run DreaMS" button.
+             your file with MS/MS data and click on the "Run DreaMS" button.
         """)
         
         # Input section
@@ -609,7 +609,7 @@ def _create_gradio_interface():
             inputs=[in_pth],
             label="Examples (click on a file to load as input)",
         )
-        
+
         # Settings section
         with gr.Accordion("⚙️ Settings", open=False):
             calculate_modified_cosine = gr.Checkbox(
@@ -626,12 +626,16 @@ def _create_gradio_interface():
         df_file = gr.File(label="Download predictions as .csv", interactive=False, visible=True)
         
         # Results table
+        headers = ["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
+                   "DreaMS similarity", "Library ID"]
+        datatype = ["number", "number", "number", "str", "number", "html", "html", "number", "str"]
+        column_widths = ["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px"]
+
         df = gr.Dataframe(
-            headers=["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
-                    "DreaMS similarity", "Library ID"],
-            datatype=["number", "number", "number", "str", "number", "html", "html", "number", "str"],
-            col_count=(9, "fixed"),
-            column_widths=["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px"],
+            headers=headers,
+            datatype=datatype,
+            col_count=(len(headers), "fixed"),
+            column_widths=column_widths,
             max_height=1000,
             show_fullscreen_button=True,
             show_row_numbers=False,
@@ -645,15 +649,13 @@ def _create_gradio_interface():
         # Function to update dataframe headers based on setting
         def update_headers(show_cosine):
             if show_cosine:
-                return gr.update(headers=["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
-                                        "DreaMS similarity", "Library ID", "Modified cosine similarity"],
-                                col_count=(10, "fixed"),
-                                column_widths=["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px", "40px"])
+                return gr.update(headers=headers + ["Modified cosine similarity"],
+                                col_count=(len(headers) + 1, "fixed"),
+                                column_widths=column_widths + ["40px"])
             else:
-                return gr.update(headers=["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
-                                        "DreaMS similarity", "Library ID"],
-                                col_count=(9, "fixed"),
-                                column_widths=["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px"])
+                return gr.update(headers=headers,
+                                col_count=(len(headers), "fixed"),
+                                column_widths=column_widths)
         
         # Update headers when setting changes
         calculate_modified_cosine.change(
