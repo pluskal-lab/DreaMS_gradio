@@ -592,8 +592,8 @@ def _create_gradio_interface():
         gr.Markdown(value="""
             DreaMS (Deep Representations Empowering the Annotation of Mass Spectra) is a transformer-based
              neural network designed to interpret tandem mass spectrometry (MS/MS) data (<a href="https://www.nature.com/articles/s41587-025-02663-3">Bushuiev et al., Nature Biotechnology, 2025</a>).
-             This website provides an easy access to perform library matching with DreaMS. Please upload
-             your MS/MS file and click on the "Run DreaMS" button. Predictions may currently take up to 10 minutes for files with several thousands of spectra.
+             This website provides an easy access to perform library matching with DreaMS against the <a href="https://huggingface.co/datasets/roman-bushuiev/MassSpecGym">MassSpecGym</a> spectral library (combination of GNPS, MoNA, and Pluskal lab data). Please upload
+             your MS/MS file and click on the "Run DreaMS" button.
         """)
         
         # Input section
