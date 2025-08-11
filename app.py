@@ -264,7 +264,7 @@ def setup():
             ('https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/example_piper_2k_spectra.mgf',
              EXAMPLE_PATH / 'example_piper_2k_spectra.mgf',
              "PiperNET example spectra"),
-            ('https://raw.githubusercontent.com/pluskal-lab/DreaMS/cc806fa6fea281c1e57dd81fc512f71de9290017/data/examples/example_5_spectra.mgf',
+            ('https://raw.githubusercontent.com/pluskal-lab/DreaMS/refs/heads/main/data/examples/example_5_spectra.mgf',
              EXAMPLE_PATH / 'example_5_spectra.mgf',
              "DreaMS example spectra")
         ]
@@ -337,7 +337,9 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
     
     # Base row data
     row_data = {
-        'feature_id': i + 1,
+        'scan_number': msdata.get_values(SCAN_NUMBER, i),
+        'rt': msdata.get_values(RT, i),
+        'charge': msdata.get_values(CHARGE, i),
         'precursor_mz': msdata.get_prec_mzs(i),
         'topk': n + 1,
         'library_j': j,
@@ -377,10 +379,6 @@ def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
     Returns:
         tuple: (processed_df, csv_path)
     """
-    # Sort hits by DreaMS similarity
-    df_top1 = df[df['topk'] == 1].sort_values('DreaMS_similarity', ascending=False)
-    df = df.set_index('feature_id').loc[df_top1['feature_id'].values].reset_index()
-    
     # Remove unnecessary columns and round similarity scores
     df = df.drop(columns=['i', 'j', 'library_j'])
     df['DreaMS_similarity'] = df['DreaMS_similarity'].astype(float).round(4)
@@ -390,12 +388,16 @@ def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
         df['Modified_cosine_similarity'] = df['Modified_cosine_similarity'].astype(float).round(4)
     
     df['precursor_mz'] = df['precursor_mz'].astype(float).round(4)
+    df['rt'] = df['rt'].astype(float).round(2)  # Round retention time to 2 decimal places
+    df['charge'] = df['charge'].astype(str)  # Keep charge as string
     
     # Rename columns for display
     column_mapping = {
         'topk': 'Top k',
         'library_ID': 'Library ID',
-        "feature_id": "Feature ID",
+        "scan_number": "Scan number",
+        "rt": "Retention time",
+        "charge": "Charge",
         "precursor_mz": "Precursor m/z",
         "library_SMILES": "Molecule",
         "library_SMILES_raw": "SMILES",
@@ -625,11 +627,11 @@ def _create_gradio_interface():
         
         # Results table
         df = gr.Dataframe(
-            headers=["Row", "Feature ID", "Precursor m/z", "Molecule", "Spectrum", 
-                    "Library ID", "DreaMS similarity"],
-            datatype=["number", "number", "number", "html", "html", "str", "number"],
-            col_count=(7, "fixed"),
-            column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px"],
+            headers=["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
+                    "DreaMS similarity", "Library ID"],
+            datatype=["number", "number", "number", "str", "number", "html", "html", "number", "str"],
+            col_count=(9, "fixed"),
+            column_widths=["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px"],
             max_height=1000,
             show_fullscreen_button=True,
             show_row_numbers=False,
@@ -643,15 +645,15 @@ def _create_gradio_interface():
         # Function to update dataframe headers based on setting
         def update_headers(show_cosine):
             if show_cosine:
-                return gr.update(headers=["Row", "Feature ID", "Precursor m/z", "Molecule", "Spectrum", 
-                                        "Library ID", "DreaMS similarity", "Modified cosine similarity"],
-                                col_count=(8, "fixed"),
-                                column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px", "40px"])
+                return gr.update(headers=["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
+                                        "DreaMS similarity", "Library ID", "Modified cosine similarity"],
+                                col_count=(10, "fixed"),
+                                column_widths=["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px", "40px"])
             else:
-                return gr.update(headers=["Row", "Feature ID", "Precursor m/z", "Molecule", "Spectrum", 
-                                        "Library ID", "DreaMS similarity"],
-                                col_count=(7, "fixed"),
-                                column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px"])
+                return gr.update(headers=["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
+                                        "DreaMS similarity", "Library ID"],
+                                col_count=(9, "fixed"),
+                                column_widths=["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px"])
         
         # Update headers when setting changes
         calculate_modified_cosine.change(
