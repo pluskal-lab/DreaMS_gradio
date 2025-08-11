@@ -615,7 +615,7 @@ def _create_gradio_interface():
             calculate_modified_cosine = gr.Checkbox(
                 label="Calculate modified cosine similarity",
                 value=False,
-                info="Enable to also calculate traditional modified cosine similarity scores (a bit slower)"
+                info="Enable to also calculate traditional modified cosine similarity scores between the input spectra and library hits (a bit slower)"
             )
         
         # Prediction button
