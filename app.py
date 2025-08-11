@@ -11,6 +11,7 @@ License: MIT
 
 import gradio as gr
 import spaces
+import shutil
 import urllib.request
 from datetime import datetime
 from functools import partial
@@ -300,17 +301,17 @@ def _predict_gpu(in_pth, progress):
     Returns:
         numpy.ndarray: DreaMS embeddings
     """
-    progress(0.1, desc="Loading spectra data...")
+    progress(0.2, desc="Loading spectra data...")
     msdata = MSData.load(in_pth)
     
-    progress(0.2, desc="Computing DreaMS embeddings...")
+    progress(0.3, desc="Computing DreaMS embeddings...")
     embs = dreams_embeddings(msdata)
     print(f'Shape of the query embeddings: {embs.shape}')
     
     return embs
 
 
-def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs):
+def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calculate_modified_cosine=False):
     """
     Create a single result row for the DataFrame
     
@@ -323,6 +324,7 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs):
         sims: Similarity matrix
         cos_sim: Cosine similarity calculator
         embs: Query embeddings
+        calculate_modified_cosine: Whether to calculate modified cosine similarity
     
     Returns:
         dict: Result row data
@@ -331,7 +333,8 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs):
     spec1 = msdata.get_spectra(i)
     spec2 = msdata_lib.get_spectra(j)
     
-    return {
+    # Base row data
+    row_data = {
         'feature_id': i + 1,
         'precursor_mz': msdata.get_prec_mzs(i),
         'topk': n + 1,
@@ -342,25 +345,32 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs):
         'Spectrum_raw': su.unpad_peak_list(spec1),
         'library_ID': msdata_lib.get_values('IDENTIFIER', j),
         'DreaMS_similarity': sims[i, j],
-        'Modified_cosine_similarity': cos_sim(
-            spec1=spec1,
-            prec_mz1=msdata.get_prec_mzs(i),
-            spec2=spec2,
-            prec_mz2=msdata_lib.get_prec_mzs(j),
-        ),
         'i': i,
         'j': j,
         'DreaMS_embedding': embs[i],
     }
+    
+    # Add modified cosine similarity only if enabled
+    if calculate_modified_cosine:
+        modified_cosine_sim = cos_sim(
+            spec1=spec1,
+            prec_mz1=msdata.get_prec_mzs(i),
+            spec2=spec2,
+            prec_mz2=msdata_lib.get_prec_mzs(j),
+        )
+        row_data['Modified_cosine_similarity'] = modified_cosine_sim
+    
+    return row_data
 
 
-def _process_results_dataframe(df, in_pth):
+def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
     """
     Process and clean the results DataFrame
     
     Args:
         df: Raw results DataFrame
         in_pth: Input file path for CSV export
+        calculate_modified_cosine: Whether modified cosine similarity was calculated
     
     Returns:
         tuple: (processed_df, csv_path)
@@ -372,7 +382,11 @@ def _process_results_dataframe(df, in_pth):
     # Remove unnecessary columns and round similarity scores
     df = df.drop(columns=['i', 'j', 'library_j'])
     df['DreaMS_similarity'] = df['DreaMS_similarity'].astype(float).round(4)
-    df['Modified_cosine_similarity'] = df['Modified_cosine_similarity'].astype(float).round(4)
+    
+    # Handle modified cosine similarity column conditionally
+    if calculate_modified_cosine and 'Modified_cosine_similarity' in df.columns:
+        df['Modified_cosine_similarity'] = df['Modified_cosine_similarity'].astype(float).round(4)
+    
     df['precursor_mz'] = df['precursor_mz'].astype(float).round(4)
     
     # Rename columns for display
@@ -386,9 +400,13 @@ def _process_results_dataframe(df, in_pth):
         "Spectrum": "Spectrum",
         "Spectrum_raw": "Input Spectrum",
         "DreaMS_similarity": "DreaMS similarity",
-        "Modified_cosine_similarity": "Modified cos similarity",
         "DreaMS_embedding": "DreaMS embedding",
     }
+    
+    # Add modified cosine similarity to column mapping only if it exists
+    if calculate_modified_cosine and 'Modified_cosine_similarity' in df.columns:
+        column_mapping["Modified_cosine_similarity"] = "Modified cos similarity"
+    
     df = df.rename(columns=column_mapping)
     
     # Save full results to CSV
@@ -409,13 +427,14 @@ def _process_results_dataframe(df, in_pth):
     return df, str(df_path)
 
 
-def _predict_core(lib_pth, in_pth, progress):
+def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
     """
     Core prediction function that orchestrates the entire prediction pipeline
     
     Args:
         lib_pth: Library file path
         in_pth: Input file path
+        calculate_modified_cosine: Whether to calculate modified cosine similarity
         progress: Gradio progress tracker
     
     Returns:
@@ -425,65 +444,77 @@ def _predict_core(lib_pth, in_pth, progress):
     
     # Clear cache at start to prevent memory buildup
     clear_smiles_cache()
-    
-    # Load library data
-    progress(0, desc="Loading library data...")
-    msdata_lib = MSData.load(lib_pth)
-    embs_lib = msdata_lib[DREAMS_EMBEDDING]
-    print(f'Shape of the library embeddings: {embs_lib.shape}')
-    
-    # Get query embeddings
-    embs = _predict_gpu(in_pth, progress)
-    
-    # Compute similarity matrix
-    progress(0.4, desc="Computing similarity matrix...")
-    sims = cosine_similarity(embs, embs_lib)
-    print(f'Shape of the similarity matrix: {sims.shape}')
-    
-    # Get top-k candidates
-    k = 1
-    topk_cands = np.argsort(sims, axis=1)[:, -k:][:, ::-1]
-    
-    # Load query data for processing
-    msdata = MSData.load(in_pth)
-    print(f'Available columns: {msdata.columns()}')
-    
-    # Construct results DataFrame
-    progress(0.5, desc="Constructing results table...")
-    df = []
-    cos_sim = su.PeakListModifiedCosine()
-    total_spectra = len(topk_cands)
-    
-    for i, topk in enumerate(topk_cands):
-        progress(0.5 + 0.4 * (i / total_spectra), 
-                desc=f"Processing hits for spectrum {i+1}/{total_spectra}...")
+
+    # Create temporary copy of library file to allow multiple processes
+    progress(0, desc="Creating temporary library copy...")
+    temp_lib_path = Path(lib_pth).parent / f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{Path(lib_pth).name}"
+    shutil.copy2(lib_pth, temp_lib_path)
+
+    try:
+        # Load library data
+        progress(0.1, desc="Loading library data...")
+        msdata_lib = MSData.load(temp_lib_path)
+        embs_lib = msdata_lib[DREAMS_EMBEDDING]
+        print(f'Shape of the library embeddings: {embs_lib.shape}')
         
-        for n, j in enumerate(topk):
-            row_data = _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs)
-            df.append(row_data)
+        # Get query embeddings
+        embs = _predict_gpu(in_pth, progress)
         
-        # Clear cache every 100 spectra to prevent memory buildup
-        if (i + 1) % 100 == 0:
-            clear_smiles_cache()
+        # Compute similarity matrix
+        progress(0.4, desc="Computing similarity matrix...")
+        sims = cosine_similarity(embs, embs_lib)
+        print(f'Shape of the similarity matrix: {sims.shape}')
+        
+        # Get top-k candidates
+        k = 1
+        topk_cands = np.argsort(sims, axis=1)[:, -k:][:, ::-1]
+        
+        # Load query data for processing
+        msdata = MSData.load(in_pth)
+        print(f'Available columns: {msdata.columns()}')
+        
+        # Construct results DataFrame
+        progress(0.5, desc="Constructing results table...")
+        df = []
+        cos_sim = su.PeakListModifiedCosine()
+        total_spectra = len(topk_cands)
+        
+        for i, topk in enumerate(topk_cands):
+            progress(0.5 + 0.4 * (i / total_spectra), 
+                    desc=f"Processing hits for spectrum {i+1}/{total_spectra}...")
+            
+            for n, j in enumerate(topk):
+                row_data = _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calculate_modified_cosine)
+                df.append(row_data)
+            
+            # Clear cache every 100 spectra to prevent memory buildup
+            if (i + 1) % 100 == 0:
+                clear_smiles_cache()
+        
+        df = pd.DataFrame(df)
+        
+        # Process and clean results
+        progress(0.9, desc="Post-processing results...")
+        df, csv_path = _process_results_dataframe(df, in_pth, calculate_modified_cosine)
+        
+        progress(1.0, desc=f"Predictions complete! Found {len(df)} high-confidence matches.")
+        
+        return df, csv_path
     
-    df = pd.DataFrame(df)
-    
-    # Process and clean results
-    progress(0.9, desc="Post-processing results...")
-    df, csv_path = _process_results_dataframe(df, in_pth)
-    
-    progress(1.0, desc=f"Predictions complete! Found {len(df)} high-confidence matches.")
-    
-    return df, csv_path
+    finally:
+        # Clean up temporary library file
+        if temp_lib_path.exists():
+            temp_lib_path.unlink()
 
 
-def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
+def predict(lib_pth, in_pth, calculate_modified_cosine=False, progress=gr.Progress(track_tqdm=True)):
     """
     Main prediction function with error handling
     
     Args:
         lib_pth: Library file path
         in_pth: Input file path
+        calculate_modified_cosine: Whether to calculate modified cosine similarity
         progress: Gradio progress tracker
     
     Returns:
@@ -501,7 +532,9 @@ def predict(lib_pth, in_pth, progress=gr.Progress(track_tqdm=True)):
         if not Path(lib_pth).exists():
             raise gr.Error("Spectral library not found. Please ensure the library file exists.")
         
-        return _predict_core(lib_pth, in_pth, progress)
+        df, csv_path = _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress)
+        
+        return df, csv_path
         
     except gr.Error:
         # Re-raise Gradio errors as-is
@@ -573,20 +606,28 @@ def _create_gradio_interface():
             label="Examples (click on a file to load as input)",
         )
         
+        # Settings section
+        with gr.Accordion("⚙️ Settings", open=False):
+            calculate_modified_cosine = gr.Checkbox(
+                label="Calculate modified cosine similarity",
+                value=False,
+                info="Enable to calculate traditional modified cosine similarity scores (slower)"
+            )
+        
         # Prediction button
         predict_button = gr.Button(value="Run DreaMS", variant="primary")
         
-        # Output section
+        # Results table
         gr.Markdown("## Predictions")
         df_file = gr.File(label="Download predictions as .csv", interactive=False, visible=True)
         
         # Results table
         df = gr.Dataframe(
             headers=["Row", "Feature ID", "Precursor m/z", "Molecule", "Spectrum", 
-                    "Library ID", "DreaMS similarity", "Modified cosine similarity"],
-            datatype=["number", "number", "number", "html", "html", "str", "number", "number"],
-            col_count=(8, "fixed"),
-            column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px", "40px"],
+                    "Library ID", "DreaMS similarity"],
+            datatype=["number", "number", "number", "html", "html", "str", "number"],
+            col_count=(7, "fixed"),
+            column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px"],
             max_height=1000,
             show_fullscreen_button=True,
             show_row_numbers=False,
@@ -594,8 +635,29 @@ def _create_gradio_interface():
         )
         
         # Connect prediction logic
-        inputs = [in_pth]
+        inputs = [in_pth, calculate_modified_cosine]
         outputs = [df, df_file]
+        
+        # Function to update dataframe headers based on setting
+        def update_headers(show_cosine):
+            if show_cosine:
+                return gr.update(headers=["Row", "Feature ID", "Precursor m/z", "Molecule", "Spectrum", 
+                                        "Library ID", "DreaMS similarity", "Modified cosine similarity"],
+                                col_count=(8, "fixed"),
+                                column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px", "40px"])
+            else:
+                return gr.update(headers=["Row", "Feature ID", "Precursor m/z", "Molecule", "Spectrum", 
+                                        "Library ID", "DreaMS similarity"],
+                                col_count=(7, "fixed"),
+                                column_widths=["25px", "25px", "28px", "60px", "60px", "50px", "40px"])
+        
+        # Update headers when setting changes
+        calculate_modified_cosine.change(
+            fn=update_headers,
+            inputs=[calculate_modified_cosine],
+            outputs=[df]
+        )
+        
         predict_func = partial(predict, LIBRARY_PATH)
         predict_button.click(predict_func, inputs=inputs, outputs=outputs, show_progress="first")
     
