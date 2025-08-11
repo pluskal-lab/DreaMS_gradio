@@ -261,8 +261,8 @@ def setup():
         
         # Download example files
         example_urls = [
-            ('https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/example_piper_2k_spectra.mgf',
-             EXAMPLE_PATH / 'example_piper_2k_spectra.mgf',
+            ('https://huggingface.co/datasets/titodamiani/PiperNET/resolve/main/lcms/rawfiles/202312_147_P55-Leaf-r2_1uL.mzML',
+             EXAMPLE_PATH / '202312_147_P55-Leaf-r2_1uL.mzML',
              "PiperNET example spectra"),
             ('https://raw.githubusercontent.com/pluskal-lab/DreaMS/refs/heads/main/data/examples/example_5_spectra.mgf',
              EXAMPLE_PATH / 'example_5_spectra.mgf',
@@ -605,7 +605,7 @@ def _create_gradio_interface():
         
         # Example files
         examples = gr.Examples(
-            examples=["./data/example_5_spectra.mgf", "./data/example_piper_2k_spectra.mgf"],
+            examples=["./data/example_5_spectra.mgf", "./data/202312_147_P55-Leaf-r2_1uL.mzML"],
             inputs=[in_pth],
             label="Examples (click on a file to load as input)",
         )
