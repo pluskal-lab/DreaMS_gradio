@@ -449,10 +449,12 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
     # Clear cache at start to prevent memory buildup
     clear_smiles_cache()
 
-    # Create temporary copy of library file to allow multiple processes
-    progress(0, desc="Creating temporary library copy...")
+    # Create temporary copies of library and input files to allow multiple processes
+    progress(0, desc="Creating temporary file copies...")
     temp_lib_path = Path(lib_pth).parent / f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{Path(lib_pth).name}"
+    temp_in_path = in_pth.parent / f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{in_pth.name}"
     shutil.copy2(lib_pth, temp_lib_path)
+    shutil.copy2(in_pth, temp_in_path)
 
     try:
         # Load library data
@@ -462,7 +464,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
         print(f'Shape of the library embeddings: {embs_lib.shape}')
         
         # Get query embeddings
-        embs = _predict_gpu(in_pth, progress)
+        embs = _predict_gpu(temp_in_path, progress)
         
         # Compute similarity matrix
         progress(0.4, desc="Computing similarity matrix...")
@@ -474,7 +476,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
         topk_cands = np.argsort(sims, axis=1)[:, -k:][:, ::-1]
         
         # Load query data for processing
-        msdata = MSData.load(in_pth, in_mem=True)
+        msdata = MSData.load(temp_in_path, in_mem=True)
         print(f'Available columns: {msdata.columns()}')
         
         # Construct results DataFrame
@@ -506,9 +508,11 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
         return df, csv_path
     
     finally:
-        # Clean up temporary library file
+        # Clean up temporary files
         if temp_lib_path.exists():
             temp_lib_path.unlink()
+        if temp_in_path.exists():
+            temp_in_path.unlink()
 
 
 def predict(lib_pth, in_pth, calculate_modified_cosine=False, progress=gr.Progress(track_tqdm=True)):
