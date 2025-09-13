@@ -337,9 +337,9 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
     
     # Base row data
     row_data = {
-        'scan_number': msdata.get_values(SCAN_NUMBER, i),
-        'rt': msdata.get_values(RT, i),
-        'charge': msdata.get_values(CHARGE, i),
+        'scan_number': msdata.get_values(SCAN_NUMBER, i) if SCAN_NUMBER in msdata.columns() else None,
+        'rt': msdata.get_values(RT, i) if RT in msdata.columns() else None,
+        'charge': msdata.get_values(CHARGE, i) if CHARGE in msdata.columns() else None,
         'precursor_mz': msdata.get_prec_mzs(i),
         'topk': n + 1,
         'library_j': j,
