@@ -46,9 +46,6 @@ LIBRARY_PATH = Path('DreaMS/data/MassSpecGym_DreaMS.hdf5')
 DATA_PATH = Path('./DreaMS/data')
 EXAMPLE_PATH = Path('./data')
 
-# Similarity threshold for filtering results
-SIMILARITY_THRESHOLD = 0.75
-
 # Cache for SMILES images to avoid regeneration
 _smiles_cache = {}
 
@@ -311,7 +308,7 @@ def _predict_gpu(in_pth, progress):
     return embs
 
 
-def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calculate_modified_cosine=False):
+def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, similarity_threshold, calculate_modified_cosine=False):
     """
     Create a single result row for the DataFrame
     
@@ -324,6 +321,7 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
         sims: Similarity matrix
         cos_sim: Cosine similarity calculator
         embs: Query embeddings
+        similarity_threshold: Similarity threshold for filtering results
         calculate_modified_cosine: Whether to calculate modified cosine similarity
     
     Returns:
@@ -343,9 +341,9 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
         'precursor_mz': msdata.get_prec_mzs(i),
         'topk': n + 1,
         'library_j': j,
-        'library_SMILES': smiles_to_html_img(smiles) if dreams_similarity > SIMILARITY_THRESHOLD else None,
+        'library_SMILES': smiles_to_html_img(smiles) if dreams_similarity > similarity_threshold else None,
         'library_SMILES_raw': smiles,
-        'Spectrum': spectrum_to_html_img(spec1, spec2) if dreams_similarity > SIMILARITY_THRESHOLD else None,
+        'Spectrum': spectrum_to_html_img(spec1, spec2) if dreams_similarity > similarity_threshold else None,
         'Spectrum_raw': su.unpad_peak_list(spec1),
         'library_ID': msdata_lib.get_values('IDENTIFIER', j),
         'DreaMS_similarity': dreams_similarity,
@@ -367,13 +365,14 @@ def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calcula
     return row_data
 
 
-def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
+def _process_results_dataframe(df, in_pth, similarity_threshold, calculate_modified_cosine=False):
     """
     Process and clean the results DataFrame
     
     Args:
         df: Raw results DataFrame
         in_pth: Input file path for CSV export
+        similarity_threshold: Similarity threshold for filtering results
         calculate_modified_cosine: Whether modified cosine similarity was calculated
     
     Returns:
@@ -423,7 +422,7 @@ def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
     df = df.drop(columns=['DreaMS embedding', "SMILES", "Input Spectrum"])
     df = df[df['Top k'] == 1].sort_values('DreaMS similarity', ascending=False)
     df = df.drop(columns=['Top k'])
-    df = df[df["DreaMS similarity"] > SIMILARITY_THRESHOLD]
+    df = df[df["DreaMS similarity"] > similarity_threshold]
     
     # Add row numbers
     df.insert(0, 'Row', range(1, len(df) + 1))
@@ -431,7 +430,7 @@ def _process_results_dataframe(df, in_pth, calculate_modified_cosine=False):
     return df, str(df_path)
 
 
-def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
+def _predict_core(lib_pth, in_pth, similarity_threshold, calculate_modified_cosine, progress):
     """
     Core prediction function that orchestrates the entire prediction pipeline
     
@@ -490,7 +489,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
                     desc=f"Processing hits for spectrum {i+1}/{total_spectra}...")
             
             for n, j in enumerate(topk):
-                row_data = _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, calculate_modified_cosine)
+                row_data = _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, similarity_threshold, calculate_modified_cosine)
                 df.append(row_data)
             
             # Clear cache every 100 spectra to prevent memory buildup
@@ -501,7 +500,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
         
         # Process and clean results
         progress(0.9, desc="Post-processing results...")
-        df, csv_path = _process_results_dataframe(df, in_pth, calculate_modified_cosine)
+        df, csv_path = _process_results_dataframe(df, in_pth, similarity_threshold, calculate_modified_cosine)
         
         progress(1.0, desc=f"Predictions complete! Found {len(df)} high-confidence matches.")
         
@@ -515,7 +514,7 @@ def _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress):
             temp_in_path.unlink()
 
 
-def predict(lib_pth, in_pth, calculate_modified_cosine=False, progress=gr.Progress(track_tqdm=True)):
+def predict(lib_pth, in_pth, similarity_threshold=0.75, calculate_modified_cosine=False, progress=gr.Progress(track_tqdm=True)):
     """
     Main prediction function with error handling
     
@@ -540,7 +539,7 @@ def predict(lib_pth, in_pth, calculate_modified_cosine=False, progress=gr.Progre
         if not Path(lib_pth).exists():
             raise gr.Error("Spectral library not found. Please ensure the library file exists.")
         
-        df, csv_path = _predict_core(lib_pth, in_pth, calculate_modified_cosine, progress)
+        df, csv_path = _predict_core(lib_pth, in_pth, similarity_threshold, calculate_modified_cosine, progress)
         
         return df, csv_path
         
@@ -616,6 +615,14 @@ def _create_gradio_interface():
 
         # Settings section
         with gr.Accordion("⚙️ Settings", open=False):
+            similarity_threshold = gr.Slider(
+                minimum=-1.0,
+                maximum=1.0,
+                value=0.75,
+                step=0.01,
+                label="Similarity threshold",
+                info="Only display library matches with DreaMS similarity above this threshold (rendering less results also makes calculation faster)"
+            )
             calculate_modified_cosine = gr.Checkbox(
                 label="Calculate modified cosine similarity",
                 value=False,
@@ -647,7 +654,7 @@ def _create_gradio_interface():
         )
         
         # Connect prediction logic
-        inputs = [in_pth, calculate_modified_cosine]
+        inputs = [in_pth, similarity_threshold, calculate_modified_cosine]
         outputs = [df, df_file]
         
         # Function to update dataframe headers based on setting
