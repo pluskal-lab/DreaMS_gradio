@@ -11,7 +11,7 @@ python_version: 3.11
 
 ## Usage
 
-This repository provides the source code for the DreaMS Gradio app. The app is currently hosted here: [https://huggingface.co/spaces/anton-bushuiev/DreaMS](https://huggingface.co/spaces/anton-bushuiev/DreaMS).
+This repository provides the source code for the DreaMS Gradio app. The app is currently hosted on Hugging Face Spaces: [https://huggingface.co/spaces/anton-bushuiev/DreaMS](https://huggingface.co/spaces/anton-bushuiev/DreaMS).
 
 ## Development
 
