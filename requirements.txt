@@ -1,4 +1,3 @@
-dreams @ git+https://github.com/pluskal-lab/DreaMS.git@a15de577b598ac88a0f51b3668c1a2dd59559f8a
-faiss-cpu==1.9.0  # TODO: Install from search similar to "pip install e .[search]"
+dreams[search] @ git+https://github.com/pluskal-lab/DreaMS.git@a15de577b598ac88a0f51b3668c1a2dd59559f8a
 # gradio
 # spaces
