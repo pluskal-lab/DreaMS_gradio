@@ -234,7 +234,7 @@ def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
 
 
 def _format_ref_precursor_mz_value(value: Any, analog_hit: bool) -> str:
-    """Return HTML snippet for ref precursor m/z with optional analog-hit tag."""
+    """Return HTML snippet for ref precursor m/z with analog-hit tag always on a new line, and non-centered text for consistency with other columns."""
     try:
         numeric_value = float(value)
         formatted_value = f"{numeric_value:.4f}".rstrip('0').rstrip('.')
@@ -243,12 +243,23 @@ def _format_ref_precursor_mz_value(value: Any, analog_hit: bool) -> str:
     except (TypeError, ValueError):
         formatted_value = str(value)
 
-    value_html = f"<span style='{_REF_MZ_VALUE_STYLE}'>{formatted_value}</span>"
-    parts = [value_html]
-    if analog_hit:
-        parts.append(f"<span style='{_ANALOG_TAG_STYLE}'>Analog hit</span>")
+    value_html = f"<div style='{_REF_MZ_VALUE_STYLE}; width: 100%; text-align: left;'>{formatted_value}</div>"
 
-    return f"<span style='{_REF_MZ_CONTAINER_STYLE}'>{''.join(parts)}</span>"
+    if analog_hit:
+        tag_html = (
+            f"<div style='width: 100%; text-align: left; margin-top: 8px;'>"
+            f"<span style='{_ANALOG_TAG_STYLE}'>Analog hit</span>"
+            f"</div>"
+        )
+        content = value_html + tag_html
+    else:
+        content = value_html
+
+    return (
+        f"<div style='{_REF_MZ_CONTAINER_STYLE}; display: block; width: 100%; text-align: left;'>"
+        f"{content}"
+        f"</div>"
+    )
 
 
 def spectrum_to_html_img(
