@@ -1,37 +1,44 @@
 """
 DreaMS Gradio Web Application
 
-This module provides a web interface for the DreaMS (Deep Representations Empowering 
-the Annotation of Mass Spectra) tool using Gradio. It allows users to upload MS/MS 
+This module provides a web interface for the DreaMS (Deep Representations Empowering
+the Annotation of Mass Spectra) tool using Gradio. It allows users to upload MS/MS
 files and perform library matching with DreaMS embeddings.
 
 Author: DreaMS Team
 License: MIT
 """
 
-import gradio as gr
-import spaces
+import base64
+import io
 import shutil
+from textwrap import wrap
 import urllib.request
 from datetime import datetime
-from functools import partial
-import matplotlib.pyplot as plt
-import matplotlib
-import pandas as pd
-import numpy as np
+from io import BytesIO
 from pathlib import Path
-from sklearn.metrics.pairwise import cosine_similarity
+from typing import Any, Optional, Sequence, Tuple, Union
+
+import gradio as gr
+import matplotlib
+
+matplotlib.use('Agg')
+
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+import pandas as pd
+import spaces
+from PIL import Image
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
-import base64
-from io import BytesIO
-from PIL import Image
-import io
-import dreams.utils.spectra as su
+from tqdm import tqdm
+
 import dreams.utils.io as dio
+import dreams.utils.spectra as su
+from dreams.api import DreaMSSearch, dreams_embeddings
+from dreams.definitions import CHARGE, PRECURSOR_MZ, SPECTRUM, DREAMS_EMBEDDING, IONMODE
 from dreams.utils.data import MSData
-from dreams.api import dreams_embeddings
-from dreams.definitions import *
+from dreams.utils.dformats import assign_dformat
 
 # =============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -41,15 +48,93 @@ from dreams.definitions import *
 SMILES_IMG_SIZE = 120  # Reduced from 200 for faster rendering
 SPECTRUM_IMG_SIZE = 800  # Reduced from 1500 for faster generation
 
+# Supported input formats
+SUPPORTED_INPUT_EXTENSIONS = {'.mgf', '.mzml', '.hdf5'}
+
 # Library and data paths
-LIBRARY_PATH = Path('DreaMS/data/MassSpecGym_DreaMS.hdf5')
-DATA_PATH = Path('./DreaMS/data')
-EXAMPLE_PATH = Path('./data')
+LIBRARY_PATH = Path("DreaMS/data/MassSpecGym_DreaMS.hdf5")
+DATA_PATH = Path("./DreaMS/data")
+EXAMPLE_PATH = Path("./data")
+
+EXAMPLE_FILES: Tuple[Tuple[str, Path, str], ...] = (
+    (
+        "https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/Piper55-Leaf-r2_1uL_damiani2023.mzML",
+        EXAMPLE_PATH / "Piper55-Leaf-r2_1uL_damiani2023.mzML",
+        "PiperNET example spectra",
+    ),
+    (
+        "https://huggingface.co/datasets/roman-bushuiev/GeMS/resolve/main/data/auxiliary/example_5_drugs_zhao2025.mgf",
+        EXAMPLE_PATH / "example_5_drugs_zhao2025.mgf",
+        "Drug analogs example spectra",
+    ),
+)
+
+DATAFRAME_COLUMNS: Tuple[dict[str, str], ...] = (
+    {"name": "Row", "header": "Row", "datatype": "number", "width": "50px"},
+    {"name": "Scan number", "header": "Scan\nnumber", "datatype": "number", "width": "85px"},
+    {"name": "Precursor m/z", "header": "Precursor\nm/z", "datatype": "number", "width": "130px"},
+    # {"name": "Adduct", "header": "Adduct", "datatype": "str", "width": "150px"},
+    {"name": "RT", "header": "RT", "datatype": "number", "width": "60px"},
+    {"name": "Molecule", "header": "Molecule", "datatype": "html", "width": "150px"},
+    {"name": "Name", "header": "Name", "datatype": "str", "width": "120px"},
+    {"name": "Spectrum", "header": "Spectrum", "datatype": "html", "width": "150px"},
+    {"name": "Ref. precursor m/z", "header": "Ref. precursor\nm/z", "datatype": "html", "width": "130px"},
+    # {"name": "Ref. adduct", "header": "Ref. adduct", "datatype": "str", "width": "150px"},
+    {"name": "Ref. RT", "header": "Ref.\nRT", "datatype": "number", "width": "60px"},
+    {"name": "Ref. molecule", "header": "Ref. molecule", "datatype": "html", "width": "135px"},
+    {"name": "Ref. name", "header": "Ref. name", "datatype": "str", "width": "150px"},
+    {"name": "Ref. scan number", "header": "Ref. scan\nnumber", "datatype": "number", "width": "85px"},
+    {"name": "Ref. ID", "header": "Ref.\nID", "datatype": "str", "width": "130px"},
+    {"name": "DreaMS similarity", "header": "DreaMS\nsimilarity", "datatype": "number", "width": "110px"},
+    {"name": "Modified cos. sim.", "header": "Modified\ncos. sim.", "datatype": "number", "width": "140px"},
+)
+
+DATAFRAME_CSS = """
+#results-dataframe {
+    overflow-x: auto;
+}
+#results-dataframe table th,
+#results-dataframe table th * {
+    white-space: pre-line !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+    text-overflow: clip;
+}
+"""
+
+def _extract_dataframe_config(
+    existing_columns: Optional[Sequence[str]] = None,
+) -> Tuple[list[str], list[str], list[str]]:
+    """Build dataframe configuration filtered to the supplied column names."""
+    cols = DATAFRAME_COLUMNS
+    if existing_columns is not None:
+        cols = [col for col in DATAFRAME_COLUMNS if col["name"] in existing_columns]
+
+    headers = [col.get("header", col["name"]) for col in cols]
+    datatypes = [col["datatype"] for col in cols]
+    widths = [col["width"] for col in cols]
+    return headers, datatypes, widths
+
+
+def _build_empty_results_dataframe() -> pd.DataFrame:
+    """Return an empty dataframe that matches the display schema."""
+    return pd.DataFrame({col["name"]: pd.Series(dtype="object") for col in DATAFRAME_COLUMNS})
+
+
+# Styling for analog hits indicator rendered alongside reference precursor m/z
+_ANALOG_TAG_STYLE = (
+    "display:inline-block;padding:2px 8px;border-radius:999px;"
+    "background-color:#f25d64;color:#fff;font-size:12px;font-weight:600;"
+    "line-height:1;"
+)
+_REF_MZ_CONTAINER_STYLE = "display:inline-flex;align-items:center;gap:6px;"
+_REF_MZ_VALUE_STYLE = "font-variant-numeric:tabular-nums;font-weight:500;"
+
 
 # Cache for SMILES images to avoid regeneration
 _smiles_cache = {}
 
-def clear_smiles_cache():
+def clear_smiles_cache() -> None:
     """Clear the SMILES image cache to free memory"""
     global _smiles_cache
     _smiles_cache.clear()
@@ -59,52 +144,26 @@ def clear_smiles_cache():
 # UTILITY FUNCTIONS FOR IMAGE CONVERSION
 # =============================================================================
 
-def _validate_input_file(file_path):
-    """
-    Validate that the input file exists and has a supported format
-    
-    Args:
-        file_path: Path to the input file
-    
-    Returns:
-        bool: True if file is valid, False otherwise
-    """
+def _validate_input_file(file_path: Union[str, Path]) -> bool:
+    """Return True when the user-supplied input file path is valid."""
     if not file_path or not Path(file_path).exists():
         return False
     
-    supported_extensions = ['.mgf', '.mzML', '.mzml']
     file_ext = Path(file_path).suffix.lower()
     
-    return file_ext in supported_extensions
+    return file_ext in SUPPORTED_INPUT_EXTENSIONS
 
 
-def _convert_pil_to_base64(img, format='PNG'):
-    """
-    Convert a PIL Image to base64 encoded string
-    
-    Args:
-        img: PIL Image object
-        format: Image format (default: 'PNG')
-    
-    Returns:
-        str: Base64 encoded image string
-    """
+def _convert_pil_to_base64(img: Image.Image, format: str = 'PNG') -> str:
+    """Convert a PIL Image to a base64-encoded string."""
     buffered = io.BytesIO()
     img.save(buffered, format=format, optimize=True)  # Added optimize=True
     img_str = base64.b64encode(buffered.getvalue())
     return f"data:image/{format.lower()};base64,{repr(img_str)[2:-1]}"
 
 
-def _crop_transparent_edges(img):
-    """
-    Crop transparent edges from a PIL Image
-    
-    Args:
-        img: PIL Image object (should be RGBA)
-    
-    Returns:
-        PIL Image: Cropped image
-    """
+def _crop_transparent_edges(img: Image.Image) -> Image.Image:
+    """Crop transparent edges from a PIL Image."""
     # Convert to RGBA if not already
     if img.mode != 'RGBA':
         img = img.convert('RGBA')
@@ -126,7 +185,7 @@ def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
     Args:
         smiles: SMILES string representation of molecule
         img_size: Size of the output image (default: SMILES_IMG_SIZE)
-    
+
     Returns:
         str: HTML img tag with base64 encoded image
     """
@@ -174,38 +233,61 @@ def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
         return result
 
 
-def spectrum_to_html_img(spec1, spec2, img_size=SPECTRUM_IMG_SIZE):
-    """
-    Convert spectrum plot to HTML image for display in Gradio dataframe
-    Optimized version based on working code
-    
-    Args:
-        spec1: First spectrum data
-        spec2: Second spectrum data (for mirror plot)
-        img_size: Size of the output image (default: SPECTRUM_IMG_SIZE)
-    
-    Returns:
-        str: HTML img tag with base64 encoded spectrum plot
-    """
+def _format_ref_precursor_mz_value(value: Any, analog_hit: bool) -> str:
+    """Return HTML snippet for ref precursor m/z with optional analog-hit tag."""
     try:
-        # Use non-interactive matplotlib backend
-        matplotlib.use('Agg')
-        
+        numeric_value = float(value)
+        formatted_value = f"{numeric_value:.4f}".rstrip('0').rstrip('.')
+        if not formatted_value:
+            formatted_value = "0"
+    except (TypeError, ValueError):
+        formatted_value = str(value)
+
+    value_html = f"<span style='{_REF_MZ_VALUE_STYLE}'>{formatted_value}</span>"
+    parts = [value_html]
+    if analog_hit:
+        parts.append(f"<span style='{_ANALOG_TAG_STYLE}'>Analog hit</span>")
+
+    return f"<span style='{_REF_MZ_CONTAINER_STYLE}'>{''.join(parts)}</span>"
+
+
+def spectrum_to_html_img(
+    spec1: Any,
+    spec2: Any,
+    img_size: int = SPECTRUM_IMG_SIZE,
+) -> str:
+    """Convert a spectrum (and optional mirror spectrum) to an embeddable HTML image."""
+    try:
         # Create the spectrum plot using DreaMS utility function
         su.plot_spectrum(spec=spec1, mirror_spec=spec2, figsize=(1.6, 0.8))  # Reduced size for performance
+
+        # Render the current figure using the Agg backend
+        fig = plt.gcf()
+        canvas = fig.canvas
+        if not isinstance(canvas, FigureCanvasAgg):
+            canvas = FigureCanvasAgg(fig)
+            fig.set_canvas(canvas)
+        canvas.draw()
         
-        # Save figure to buffer with transparent background
-        buffered = BytesIO()
-        plt.savefig(buffered, format='png', bbox_inches='tight', dpi=80, transparent=True)
-        buffered.seek(0)
-        
-        # Convert to PIL Image, crop edges, and convert to base64
-        img = Image.open(buffered)
-        img = _crop_transparent_edges(img)
-        img_str = _convert_pil_to_base64(img)
+        # Save figure to buffer with tight layout to retain axis labels
+        with BytesIO() as buffered:
+            fig.savefig(
+                buffered,
+                format='png',
+                bbox_inches='tight',
+                dpi=70,
+                transparent=True,
+            )
+            buffered.seek(0)
+            
+            # Convert to PIL Image, crop edges, and convert to base64
+            img = Image.open(buffered)
+            img.load()
+            img = _crop_transparent_edges(img)
+            img_str = _convert_pil_to_base64(img)
         
         # Clean up matplotlib figure to free memory
-        plt.close()
+        plt.close(fig)
         
         return f"<img src='{img_str}' style='max-width: 100%; height: auto;' title='Spectrum comparison' />"
         
@@ -217,15 +299,8 @@ def spectrum_to_html_img(spec1, spec2, img_size=SPECTRUM_IMG_SIZE):
 # DATA DOWNLOAD AND SETUP FUNCTIONS
 # =============================================================================
 
-def _download_file(url, target_path, description):
-    """
-    Download a file from URL if it doesn't exist
-    
-    Args:
-        url: Source URL
-        target_path: Target file path
-        description: Description for logging
-    """
+def _download_file(url: str, target_path: Path, description: str) -> None:
+    """Download a file from URL if it does not already exist."""
     if not target_path.exists():
         print(f"Downloading {description}...")
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,17 +308,8 @@ def _download_file(url, target_path, description):
         print(f"Downloaded {description} to {target_path}")
 
 
-def setup():
-    """
-    Initialize the application by downloading required data files
-    
-    Downloads:
-    - MassSpecGym spectral library
-    - Example MS/MS files for testing
-    
-    Raises:
-        Exception: If critical setup steps fail
-    """
+def setup() -> None:
+    """Initialize the application by downloading required data files."""
     print("=" * 60)
     print("Setting up DreaMS application...")
     print("=" * 60)
@@ -257,24 +323,15 @@ def setup():
         _download_file(library_url, LIBRARY_PATH, "MassSpecGym spectral library")
         
         # Download example files
-        example_urls = [
-            ('https://huggingface.co/datasets/titodamiani/PiperNET/resolve/main/lcms/rawfiles/202312_147_P55-Leaf-r2_1uL.mzML',
-             EXAMPLE_PATH / '202312_147_P55-Leaf-r2_1uL.mzML',
-             "PiperNET example spectra"),
-            ('https://raw.githubusercontent.com/pluskal-lab/DreaMS/refs/heads/main/data/examples/example_5_spectra.mgf',
-             EXAMPLE_PATH / 'example_5_spectra.mgf',
-             "DreaMS example spectra")
-        ]
-        
-        for url, path, desc in example_urls:
+        for url, path, desc in EXAMPLE_FILES:
             _download_file(url, path, desc)
         
         # Test DreaMS embeddings to ensure everything works
-        print("\nTesting DreaMS embeddings...")
-        test_path = EXAMPLE_PATH / 'example_5_spectra.mgf'
-        embs = dreams_embeddings(test_path)
-        print(f"✓ Setup complete - DreaMS embeddings test successful (shape: {embs.shape})")
-        print("=" * 60)
+        # print("\nTesting DreaMS embeddings...")
+        # test_path = EXAMPLE_PATH / 'example_5_spectra.mgf'
+        # embs = dreams_embeddings(test_path)
+        # print(f"✓ Setup complete - DreaMS embeddings test successful (shape: {embs.shape})")
+        # print("=" * 60)
         
     except Exception as e:
         print(f"✗ Setup failed: {e}")
@@ -287,224 +344,216 @@ def setup():
 # =============================================================================
 
 @spaces.GPU
-def _predict_gpu(in_pth, progress):
-    """
-    GPU-accelerated prediction of DreaMS embeddings
-    
-    Args:
-        in_pth: Input file path
-        progress: Gradio progress tracker
-    
-    Returns:
-        numpy.ndarray: DreaMS embeddings
-    """
-    progress(0.2, desc="Loading spectra data...")
-    msdata = MSData.load(in_pth)
-    
-    progress(0.3, desc="Computing DreaMS embeddings...")
-    embs = dreams_embeddings(msdata)
-    print(f'Shape of the query embeddings: {embs.shape}')
-    
-    return embs
+def _predict_gpu(
+    msdata: MSData,
+    lib_msdata: MSData,
+    similarity_threshold: float,
+    progress: gr.Progress,
+) -> pd.DataFrame:
+    """Execute the search step on GPU (if available) and return raw matches."""
+    progress(0.3, desc="Initializing DreaMS search engine...")
+    searcher = DreaMSSearch(ref_spectra=lib_msdata)
+
+    progress(0.6, desc="Preparing input spectra for search...")
+    df = searcher.query(query_spectra=msdata, k=1, dreams_sim_thld=similarity_threshold, out_embs=True)
+    return df
 
 
-def _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, similarity_threshold, calculate_modified_cosine=False):
-    """
-    Create a single result row for the DataFrame
-    
-    Args:
-        i: Query spectrum index
-        j: Library spectrum index
-        n: Top-k rank
-        msdata: Query MS data
-        msdata_lib: Library MS data
-        sims: Similarity matrix
-        cos_sim: Cosine similarity calculator
-        embs: Query embeddings
-        similarity_threshold: Similarity threshold for filtering results
-        calculate_modified_cosine: Whether to calculate modified cosine similarity
-    
-    Returns:
-        dict: Result row data
-    """
-    smiles = msdata_lib.get_smiles(j)
-    spec1 = msdata.get_spectra(i)
-    spec2 = msdata_lib.get_spectra(j)
-    
-    dreams_similarity = sims[i, j]
-    
-    # Base row data
-    row_data = {
-        'scan_number': msdata.get_values(SCAN_NUMBER, i) if SCAN_NUMBER in msdata.columns() else None,
-        'rt': msdata.get_values(RT, i) if RT in msdata.columns() else None,
-        'charge': msdata.get_values(CHARGE, i) if CHARGE in msdata.columns() else None,
-        'precursor_mz': msdata.get_prec_mzs(i),
-        'topk': n + 1,
-        'library_j': j,
-        'library_SMILES': smiles_to_html_img(smiles) if dreams_similarity > similarity_threshold else None,
-        'library_SMILES_raw': smiles,
-        'Spectrum': spectrum_to_html_img(spec1, spec2) if dreams_similarity > similarity_threshold else None,
-        'Spectrum_raw': su.unpad_peak_list(spec1),
-        'library_ID': msdata_lib.get_values('IDENTIFIER', j),
-        'DreaMS_similarity': dreams_similarity,
-        'i': i,
-        'j': j,
-        'DreaMS_embedding': embs[i],
-    }
-    
-    # Add modified cosine similarity only if enabled
-    if calculate_modified_cosine:
-        modified_cosine_sim = cos_sim(
-            spec1=spec1,
-            prec_mz1=msdata.get_prec_mzs(i),
-            spec2=spec2,
-            prec_mz2=msdata_lib.get_prec_mzs(j),
-        )
-        row_data['Modified_cosine_similarity'] = modified_cosine_sim
-    
-    return row_data
+def _rename_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply human-friendly column names for presentation."""
+    columns = df.columns.tolist()
+    columns = [
+        c.replace('ref_', 'Ref._')
+        .replace('smiles', 'SMILES')
+        .replace('precursor_mz', 'precursor_m/z')
+        .replace('IDENTIFIER', 'ID')
+        # .replace('scan_number', 'feature_ID')
+        .replace('SMILES', 'molecule')
+        .replace('_', ' ')
+        for c in columns
+    ]
+    def capitalize_first(s):
+        return s[0].upper() + s[1:] if s else s
+    columns = [capitalize_first(c) for c in columns]
+    df.columns = columns
+    return df
 
 
-def _process_results_dataframe(df, in_pth, similarity_threshold, calculate_modified_cosine=False):
-    """
-    Process and clean the results DataFrame
-    
-    Args:
-        df: Raw results DataFrame
-        in_pth: Input file path for CSV export
-        similarity_threshold: Similarity threshold for filtering results
-        calculate_modified_cosine: Whether modified cosine similarity was calculated
-    
-    Returns:
-        tuple: (processed_df, csv_path)
-    """
-    # Remove unnecessary columns and round similarity scores
-    df = df.drop(columns=['i', 'j', 'library_j'])
-    df['DreaMS_similarity'] = df['DreaMS_similarity'].astype(float).round(4)
-    
-    # Handle modified cosine similarity column conditionally
-    if calculate_modified_cosine and 'Modified_cosine_similarity' in df.columns:
-        df['Modified_cosine_similarity'] = df['Modified_cosine_similarity'].astype(float).round(4)
-    
-    df['precursor_mz'] = df['precursor_mz'].astype(float).round(4)
-    df['rt'] = df['rt'].astype(float).round(2)  # Round retention time to 2 decimal places
-    df['charge'] = df['charge'].astype(str)  # Keep charge as string
-    
-    # Rename columns for display
-    column_mapping = {
-        'topk': 'Top k',
-        'library_ID': 'Library ID',
-        "scan_number": "Scan number",
-        "rt": "Retention time",
-        "charge": "Charge",
-        "precursor_mz": "Precursor m/z",
-        "library_SMILES": "Molecule",
-        "library_SMILES_raw": "SMILES",
-        "Spectrum": "Spectrum",
-        "Spectrum_raw": "Input Spectrum",
-        "DreaMS_similarity": "DreaMS similarity",
-        "DreaMS_embedding": "DreaMS embedding",
-    }
-    
-    # Add modified cosine similarity to column mapping only if it exists
-    if calculate_modified_cosine and 'Modified_cosine_similarity' in df.columns:
-        column_mapping["Modified_cosine_similarity"] = "Modified cos similarity"
-    
-    df = df.rename(columns=column_mapping)
-    
-    # Save full results to CSV
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    df_path = dio.append_to_stem(in_pth, f"MassSpecGym_hits_{timestamp}").with_suffix('.csv')
-    df_to_save = df.drop(columns=['Molecule', 'Spectrum', 'Top k'])
-    df_to_save.to_csv(df_path, index=False)
-    
-    # Filter and prepare final display DataFrame
-    df = df.drop(columns=['DreaMS embedding', "SMILES", "Input Spectrum"])
-    df = df[df['Top k'] == 1].sort_values('DreaMS similarity', ascending=False)
-    df = df.drop(columns=['Top k'])
-    df = df[df["DreaMS similarity"] > similarity_threshold]
-    
-    # Add row numbers
-    df.insert(0, 'Row', range(1, len(df) + 1))
-    
-    return df, str(df_path)
+def _reformat_columns_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Format numeric columns for readability in the results table."""
+    for col in df.columns:
+        if col.endswith('mz'):
+            df[col] = df[col].astype(float).round(4)
+        elif col.endswith('rt'):
+            df[col] = df[col].astype(float).round(2)
+        elif col.endswith('similarity'):
+            df[col] = df[col].astype(float).round(4)
+        elif col.endswith('RT'):
+            df[col] = (df[col] / 60).round(2)  # Seconds to minutes
+        elif col.endswith('Modified_cos._sim.'):
+            df[col] = df[col].astype(float).round(4)
+    return df
 
 
-def _predict_core(lib_pth, in_pth, similarity_threshold, calculate_modified_cosine, progress):
-    """
-    Core prediction function that orchestrates the entire prediction pipeline
-    
-    Args:
-        lib_pth: Library file path
-        in_pth: Input file path
-        calculate_modified_cosine: Whether to calculate modified cosine similarity
-        progress: Gradio progress tracker
-    
-    Returns:
-        tuple: (results_dataframe, csv_file_path)
-    """
+def _filter_input_data(
+    pth: Path,
+    only_single_charge: bool = True,
+    only_high_quality_spectra: bool = True,
+) -> Path:
+    """Return a filtered copy of the input MSData file according to quality filters."""
+    msdata = MSData.load(pth, in_mem=True)
+    print(f"Original number of rows in {pth.name}: {len(msdata)}")
+
+    idx = []
+    for i in tqdm(range(len(msdata)), desc=f"Filtering dataset {pth.name}"):
+        if only_single_charge:
+            # if IONMODE in msdata.columns():
+            #     if msdata.get_values(IONMODE, idx=i) == '-':
+            #         continue
+            if CHARGE in msdata.columns():
+                charge = msdata.get_values(CHARGE, idx=i)
+                if charge > 1 or charge < -1:  # -1 if often used for unknown charge?
+                    continue
+        if only_high_quality_spectra:
+            if assign_dformat(msdata.get_values(SPECTRUM, i), msdata.get_values(PRECURSOR_MZ, i)) != 'A':
+                continue
+        idx.append(i)
+
+    pth_filtered = pth.with_suffix('.filtered.hdf5')
+    msdata_filtered = msdata.form_subset(idx=idx, out_pth=pth_filtered)
+    print(f"Filtered number of rows in {pth_filtered.name}: {len(msdata_filtered)}")
+
+    if len(msdata_filtered) == 0:
+        raise ValueError(f"No spectra passed the quality filters. Please disable 'Only predict on high-quality input"
+        "spectra' or check your input file.")
+
+    return pth_filtered
+
+
+def _predict_core(
+    lib_pth: Union[str, Path],
+    in_pth: Union[str, Path],
+    similarity_threshold: float,
+    calculate_modified_cosine: bool,
+    progress: gr.Progress,
+    only_high_quality_input: bool,
+) -> Tuple[pd.DataFrame, Optional[str]]:
+    """Coordinate the full library search pipeline for DreaMS predictions."""
     in_pth = Path(in_pth)
-    
+    lib_pth = Path(lib_pth)
+
     # Clear cache at start to prevent memory buildup
     clear_smiles_cache()
 
     # Create temporary copies of library and input files to allow multiple processes
     progress(0, desc="Creating temporary file copies...")
-    temp_lib_path = Path(lib_pth).parent / f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{Path(lib_pth).name}"
-    temp_in_path = in_pth.parent / f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{in_pth.name}"
+    temp_lib_path = dio.append_to_stem(lib_pth, f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    temp_in_path = dio.append_to_stem(in_pth, f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     shutil.copy2(lib_pth, temp_lib_path)
     shutil.copy2(in_pth, temp_in_path)
 
     try:
-        # Load library data
-        progress(0.1, desc="Loading library data...")
-        msdata_lib = MSData.load(temp_lib_path, in_mem=True)
-        embs_lib = msdata_lib[DREAMS_EMBEDDING]
-        print(f'Shape of the library embeddings: {embs_lib.shape}')
+        temp_in_path = _filter_input_data(temp_in_path, only_single_charge=True, only_high_quality_spectra=only_high_quality_input)
+        # temp_lib_path = _filter_input_data(temp_lib_path)
+        df = _predict_gpu(temp_in_path, temp_lib_path, similarity_threshold, progress)
+
+        if df is None or (hasattr(df, "empty") and df.empty):
+            progress(1.0, desc="No matches found.")
+            return _build_empty_results_dataframe(), None
+
+        # Add modified cosine similarity only if enabled
+        if calculate_modified_cosine:
+            cos_sims = []
+            modified_cosine_sim = su.PeakListModifiedCosine()
+            for i in tqdm(range(len(df)), desc="Calculating modified cosine similarity"):
+                cos_sims.append(modified_cosine_sim(
+                    spec1=df[SPECTRUM].iloc[i],
+                    prec_mz1=df[PRECURSOR_MZ].iloc[i],
+                    spec2=df[f'ref_{SPECTRUM}'].iloc[i],
+                    prec_mz2=df[f'ref_{PRECURSOR_MZ}'].iloc[i],
+                ))
+            df['Modified_cos._sim.'] = cos_sims
+
+        # Add row number for display
+        if 'Row' not in df.columns:
+            df.insert(0, 'Row', list(range(1, len(df) + 1)))
         
-        # Get query embeddings
-        embs = _predict_gpu(temp_in_path, progress)
+        df['analog_hit'] = (df[PRECURSOR_MZ] - df[f'ref_{PRECURSOR_MZ}']).round(2).abs() >= 0.01
+
+        # Store results to CSV
+        progress(0.7, desc="Saving results to TSV...")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        df_path = dio.append_to_stem(in_pth, f"{lib_pth.stem}_hits_{timestamp}").with_suffix('.tsv')
+
+        # Convert spectrum to lists before saving to TSV
+        df_to_save = df.copy()
+        for col in df_to_save.columns:
+            if col.endswith(SPECTRUM):
+                df_to_save[col] = df_to_save[col].apply(lambda x: su.unpad_peak_list(x).tolist())
+
+        df_to_save.to_csv(df_path, index=False, sep='\t')
+
+        for col in df_to_save.columns:
+            if col.endswith(IONMODE):
+                if '-' in df_to_save[col].tolist():
+                    # Note: As of Gradio 3.x/4.x, gr.Warning does not natively support duration control through its API.
+                    gr.Warning(
+                        "Negative mode spectra found. Please note that the current version of DreaMS was "
+                        "trained on positive mode spectra only. This may lead to unexpected results.",
+                        duration=30
+                    )
+                    break
+
+        # Subsequent code is performed after saving to TSV, for display dataframe only
+        progress(0.85, desc="Painting molecules...")
+        for col in df.columns:
+            if col.endswith('smiles'):
+                rendered_smiles = []
+                for idx, smiles in tqdm(enumerate(df[col], start=1), desc="Painting molecules", total=len(df[col])):
+                    rendered_smiles.append(smiles_to_html_img(smiles))
+                    if idx % 100 == 0:
+                        clear_smiles_cache()
+                df[col] = rendered_smiles
+
+        progress(0.9, desc="Painting spectra...")
+        df[SPECTRUM] = [
+            spectrum_to_html_img(query, ref)
+            for query, ref in tqdm(zip(df[SPECTRUM], df[f'ref_{SPECTRUM}']), desc="Painting spectra", total=len(df))
+        ]
         
-        # Compute similarity matrix
-        progress(0.4, desc="Computing similarity matrix...")
-        sims = cosine_similarity(embs, embs_lib)
-        print(f'Shape of the similarity matrix: {sims.shape}')
-        
-        # Get top-k candidates
-        k = 1
-        topk_cands = np.argsort(sims, axis=1)[:, -k:][:, ::-1]
-        
-        # Load query data for processing
-        msdata = MSData.load(temp_in_path, in_mem=True)
-        print(f'Available columns: {msdata.columns()}')
-        
-        # Construct results DataFrame
-        progress(0.5, desc="Constructing results table...")
-        df = []
-        cos_sim = su.PeakListModifiedCosine()
-        total_spectra = len(topk_cands)
-        
-        for i, topk in enumerate(topk_cands):
-            progress(0.5 + 0.4 * (i / total_spectra), 
-                    desc=f"Processing hits for spectrum {i+1}/{total_spectra}...")
-            
-            for n, j in enumerate(topk):
-                row_data = _create_result_row(i, j, n, msdata, msdata_lib, sims, cos_sim, embs, similarity_threshold, calculate_modified_cosine)
-                df.append(row_data)
-            
-            # Clear cache every 100 spectra to prevent memory buildup
-            if (i + 1) % 100 == 0:
-                clear_smiles_cache()
-        
-        df = pd.DataFrame(df)
-        
-        # Process and clean results
-        progress(0.9, desc="Post-processing results...")
-        df, csv_path = _process_results_dataframe(df, in_pth, similarity_threshold, calculate_modified_cosine)
+        print('Columns:')
+        print(df.columns)
+
+        df = _reformat_columns_for_display(df)
+
+        analog_column = df['analog_hit'] if 'analog_hit' in df.columns else None
+        analog_flags = (
+            analog_column.fillna(False).astype(bool).tolist()
+            if analog_column is not None
+            else [False] * len(df)
+        )
+        ref_precursor_values = df[f'ref_{PRECURSOR_MZ}'].tolist()
+        if len(analog_flags) < len(ref_precursor_values):
+            analog_flags.extend([False] * (len(ref_precursor_values) - len(analog_flags)))
+        elif len(analog_flags) > len(ref_precursor_values):
+            analog_flags = analog_flags[:len(ref_precursor_values)]
+        df[f'ref_{PRECURSOR_MZ}'] = [
+            _format_ref_precursor_mz_value(value, analog_flags[idx])
+            for idx, value in enumerate(ref_precursor_values)
+        ]
+        if 'analog_hit' in df.columns:
+            df = df.drop(columns=['analog_hit'])
+
+        df = _rename_columns_for_display(df)
+
+        print('Renamed columns:')
+        print(df.columns)
+
+        df = df[[c['name'] for c in DATAFRAME_COLUMNS if c['name'] in df.columns]]
         
         progress(1.0, desc=f"Predictions complete! Found {len(df)} high-confidence matches.")
-        
-        return df, csv_path
+
+        return df, str(df_path)
     
     finally:
         # Clean up temporary files
@@ -514,34 +563,52 @@ def _predict_core(lib_pth, in_pth, similarity_threshold, calculate_modified_cosi
             temp_in_path.unlink()
 
 
-def predict(lib_pth, in_pth, similarity_threshold=0.75, calculate_modified_cosine=False, progress=gr.Progress(track_tqdm=True)):
-    """
-    Main prediction function with error handling
-    
-    Args:
-        lib_pth: Library file path
-        in_pth: Input file path
-        calculate_modified_cosine: Whether to calculate modified cosine similarity
-        progress: Gradio progress tracker
-    
-    Returns:
-        tuple: (results_dataframe, csv_file_path)
-    
-    Raises:
-        gr.Error: If prediction fails or input is invalid
-    """
+def predict(
+    lib_pth: Union[str, Path],
+    in_pth: Union[str, Path],
+    similarity_threshold: float = 0.75,
+    calculate_modified_cosine: bool = False,
+    only_high_quality_input: bool = True,
+    progress: gr.Progress = gr.Progress(track_tqdm=True),
+) -> Tuple[Any, Any]:
+    """Main prediction entry point with user-facing error handling."""
     try:
         # Validate input file
         if not _validate_input_file(in_pth):
-            raise gr.Error("Invalid input file. Please provide a valid .mgf or .mzML file.")
+            raise gr.Error("Invalid input file. Please provide a valid .mgf, .mzML, or .hdf5 file.")
         
         # Check if library exists
         if not Path(lib_pth).exists():
             raise gr.Error("Spectral library not found. Please ensure the library file exists.")
         
-        df, csv_path = _predict_core(lib_pth, in_pth, similarity_threshold, calculate_modified_cosine, progress)
-        
-        return df, csv_path
+        df_raw, csv_path = _predict_core(
+            lib_pth,
+            in_pth,
+            similarity_threshold,
+            calculate_modified_cosine,
+            progress,
+            only_high_quality_input,
+        )
+
+        headers, datatype, column_widths = _extract_dataframe_config(df_raw.columns)
+
+        df = gr.update(
+            value=df_raw,
+            headers=headers,
+            datatype=datatype,
+            column_widths=column_widths,
+            column_count=(len(headers), "fixed"),
+        )
+
+        if isinstance(df_raw, pd.DataFrame) and df_raw.empty:
+            gr.Info("No matches were found. Consider lowering the DreaMS similarity threshold for finding analog matches or checking your input file.")
+
+        if csv_path:
+            file_update = gr.update(value=csv_path, visible=True, interactive=False)
+        else:
+            file_update = gr.update(value=None, visible=False, interactive=False)
+
+        return df, file_update
         
     except gr.Error:
         # Re-raise Gradio errors as-is
@@ -563,13 +630,8 @@ def predict(lib_pth, in_pth, similarity_threshold=0.75, calculate_modified_cosin
 # GRADIO INTERFACE SETUP
 # =============================================================================
 
-def _create_gradio_interface():
-    """
-    Create and configure the Gradio interface
-    
-    Returns:
-        gr.Blocks: Configured Gradio app
-    """
+def _create_gradio_interface() -> gr.Blocks:
+    """Create and configure the Gradio Blocks interface."""
     # JavaScript for theme management
     js_func = """
     function refresh() {
@@ -584,49 +646,83 @@ def _create_gradio_interface():
     # Create app with custom theme
     app = gr.Blocks(
         theme=gr.themes.Default(primary_hue="yellow", secondary_hue="pink"), 
-        js=js_func
+        js=js_func,
+        css=DATAFRAME_CSS,
     )
     
     with app:
         # Header and description
-        gr.Image("https://raw.githubusercontent.com/pluskal-lab/DreaMS/cc806fa6fea281c1e57dd81fc512f71de9290017/assets/dreams_background.png", 
-                label="DreaMS")
-        
-        gr.Markdown(value="""
-            DreaMS (Deep Representations Empowering the Annotation of Mass Spectra) is a transformer-based
-             neural network designed to interpret tandem mass spectrometry (MS/MS) data (<a href="https://www.nature.com/articles/s41587-025-02663-3">Bushuiev et al., Nature Biotechnology, 2025</a>).
-             This website provides an easy access to perform library matching with DreaMS against the <a href="https://huggingface.co/datasets/roman-bushuiev/MassSpecGym">MassSpecGym</a> spectral library (combination of GNPS, MoNA, and Pluskal lab data). Please upload
-             your file with MS/MS data and click on the "Run DreaMS" button.
-        """)
-        
+        gr.Image(
+            "https://raw.githubusercontent.com/pluskal-lab/DreaMS/cc806fa6fea281c1e57dd81fc512f71de9290017/assets/dreams_background.png",
+            label="DreaMS"
+        )
+
+        gr.Markdown(
+            value=(
+                "DreaMS (Deep Representations Empowering the Annotation of Mass Spectra) is a "
+                "transformer-based neural network designed to interpret tandem mass spectrometry (MS/MS) "
+                "data (<a href=\"https://www.nature.com/articles/s41587-025-02663-3\">Bushuiev et al., Nature Biotechnology, 2025</a>). "
+                "This website provides an easy access to perform spectral library searches to identify small molecules or their analogue candidates by querying "
+                "<a href=\"https://huggingface.co/datasets/roman-bushuiev/MassSpecGym\">MassSpecGym</a> spectral library (combination of GNPS, MoNA, and Pluskal lab data) "
+                "or custom MS/MS datasets. "
+                "Please upload your file with MS/MS data and click on the \"Run DreaMS\" button. In case of any issues, questions, or feedback, "
+                "please don't hesitate to open an issue on the <a href=\"https://github.com/pluskal-lab/DreaMS/issues\">DreaMS GitHub</a> page."
+            )
+        )
+
         # Input section
         with gr.Row(equal_height=True):
             in_pth = gr.File(
                 file_count="single",
-                label="Input MS/MS file (.mgf or .mzML)",
+                label="Input MS/MS file (.mgf, .mzML, .hdf5)",
             )
-        
+
         # Example files
         examples = gr.Examples(
-            examples=["./data/example_5_spectra.mgf", "./data/202312_147_P55-Leaf-r2_1uL.mzML"],
+            examples=[
+                "./data/example_5_drugs_zhao2025.mgf",
+                "./data/Piper55-Leaf-r2_1uL_damiani2023.mzML"
+            ],
             inputs=[in_pth],
             label="Examples (click on a file to load as input)",
         )
 
         # Settings section
         with gr.Accordion("⚙️ Settings", open=False):
+            lib_pth = gr.File(
+                file_count="single",
+                label="Reference MS/MS file or spectral library (.mgf, .mzML, .hdf5)",
+                value=str(LIBRARY_PATH),
+                interactive=True,
+                visible=True,
+            )
             similarity_threshold = gr.Slider(
                 minimum=-1.0,
                 maximum=1.0,
                 value=0.75,
                 step=0.01,
                 label="Similarity threshold",
-                info="Only display library matches with DreaMS similarity above this threshold (rendering less results also makes calculation faster)"
+                info=(
+                    "Only display library matches with DreaMS similarity above this threshold "
+                    "(rendering less results also makes calculation faster)"
+                ),
             )
             calculate_modified_cosine = gr.Checkbox(
                 label="Calculate modified cosine similarity",
                 value=False,
-                info="Enable to also calculate traditional modified cosine similarity scores between the input spectra and library hits (a bit slower)"
+                info=(
+                    "Enable to also calculate traditional modified cosine similarity scores between "
+                    "the input spectra and library hits (a bit slower)"
+                ),
+            )
+            only_high_quality_input = gr.Checkbox(
+                label="Only predict on high-quality input spectra",
+                value=True,
+                info=(
+                    "Enable to exclude low-quality input spectra before prediction. MS/MS spectrum is considered "
+                    "low-quality if it does not satisfy A quality criteria as defined in the DreaMS paper "
+                    "(<a href='https://www.nature.com/articles/s41587-025-02663-3/figures/2'>Fig. 2b</a>)."
+                ),
             )
         
         # Prediction button
@@ -634,13 +730,9 @@ def _create_gradio_interface():
         
         # Results table
         gr.Markdown("## Predictions")
-        df_file = gr.File(label="Download predictions as .csv", interactive=False, visible=True)
+        df_file = gr.File(label="Download predictions as .tsv", interactive=False, visible=True)
         
-        # Results table
-        headers = ["Row", "Scan number", "Retention time", "Charge", "Precursor m/z", "Molecule", "Spectrum", 
-                   "DreaMS similarity", "Library ID"]
-        datatype = ["number", "number", "number", "str", "number", "html", "html", "number", "str"]
-        column_widths = ["20px", "30px", "30px", "25px", "30px", "40px", "40px", "40px", "50px"]
+        headers, datatype, column_widths = _extract_dataframe_config()
 
         df = gr.Dataframe(
             headers=headers,
@@ -648,19 +740,22 @@ def _create_gradio_interface():
             col_count=(len(headers), "fixed"),
             column_widths=column_widths,
             max_height=1000,
-            show_fullscreen_button=True,
             show_row_numbers=False,
             show_search='filter',
+            wrap=True,
+            interactive=False,
+            pinned_columns=1,
+            elem_id="results-dataframe"
         )
         
         # Connect prediction logic
-        inputs = [in_pth, similarity_threshold, calculate_modified_cosine]
+        inputs = [lib_pth, in_pth, similarity_threshold, calculate_modified_cosine, only_high_quality_input]
         outputs = [df, df_file]
         
         # Function to update dataframe headers based on setting
         def update_headers(show_cosine):
             if show_cosine:
-                return gr.update(headers=headers + ["Modified cosine similarity"],
+                return gr.update(headers=headers + ["Modified\ncosine similarity"],
                                 col_count=(len(headers) + 1, "fixed"),
                                 column_widths=column_widths + ["40px"])
             else:
@@ -675,8 +770,7 @@ def _create_gradio_interface():
             outputs=[df]
         )
         
-        predict_func = partial(predict, LIBRARY_PATH)
-        predict_button.click(predict_func, inputs=inputs, outputs=outputs, show_progress="first")
+        predict_button.click(predict, inputs=inputs, outputs=outputs, show_progress="first")
     
     return app
 
