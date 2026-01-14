@@ -643,17 +643,15 @@ def predict(
 
 def _create_gradio_interface() -> gr.Blocks:
     """Create and configure the Gradio Blocks interface."""
-    # JavaScript for theme management
     js_func = """
-    function refresh() {
-        const url = new URL(window.location);
-        if (url.searchParams.get('__theme') !== 'light') {
-            url.searchParams.set('__theme', 'light');
-            window.location.href = url.href;
-        }
+    () => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("__theme") !== "light") {
+        url.searchParams.set("__theme", "light");
+        window.location.replace(url.toString());
+    }
     }
     """
-    
     # Create app with custom theme
     app = gr.Blocks(
         theme=gr.themes.Default(primary_hue="yellow", secondary_hue="pink"), 
