@@ -729,7 +729,7 @@ def _create_gradio_interface() -> gr.Blocks:
                 value=True,
                 info=(
                     "Enable to exclude low-quality input spectra before prediction. MS/MS spectrum is considered "
-                    "low-quality if it does not satisfy A quality criteria as defined in the DreaMS paper "
+                    "low-quality if it does not satisfy quality criteria \"A\" as defined in the DreaMS paper "
                     "(<a href='https://www.nature.com/articles/s41587-025-02663-3/figures/2'>Fig. 2b</a>)."
                 ),
             )
