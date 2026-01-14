@@ -328,7 +328,7 @@ def setup() -> None:
         
         # Test DreaMS embeddings to ensure everything works
         print("\nTesting DreaMS embeddings...")
-        test_path = EXAMPLE_PATH / 'example_5_spectra.mgf'
+        test_path = EXAMPLE_PATH / "example_5_drugs_zhao2025.mgf"
         embs = dreams_embeddings(test_path)
         print(f"✓ Setup complete - DreaMS embeddings test successful (shape: {embs.shape})")
         print("=" * 60)
