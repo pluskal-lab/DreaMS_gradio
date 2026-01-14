@@ -327,11 +327,11 @@ def setup() -> None:
             _download_file(url, path, desc)
         
         # Test DreaMS embeddings to ensure everything works
-        # print("\nTesting DreaMS embeddings...")
-        # test_path = EXAMPLE_PATH / 'example_5_spectra.mgf'
-        # embs = dreams_embeddings(test_path)
-        # print(f"✓ Setup complete - DreaMS embeddings test successful (shape: {embs.shape})")
-        # print("=" * 60)
+        print("\nTesting DreaMS embeddings...")
+        test_path = EXAMPLE_PATH / 'example_5_spectra.mgf'
+        embs = dreams_embeddings(test_path)
+        print(f"✓ Setup complete - DreaMS embeddings test successful (shape: {embs.shape})")
+        print("=" * 60)
         
     except Exception as e:
         print(f"✗ Setup failed: {e}")
