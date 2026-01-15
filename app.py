@@ -45,7 +45,7 @@ from dreams.utils.dformats import assign_dformat
 # =============================================================================
 
 # Optimized image sizes for better performance
-SMILES_IMG_SIZE = 120  # Reduced from 200 for faster rendering
+SMILES_IMG_SIZE = 200
 SPECTRUM_IMG_SIZE = 800  # Reduced from 1500 for faster generation
 
 # Supported input formats
