@@ -715,9 +715,9 @@ def _create_gradio_interface() -> gr.Blocks:
                 visible=True,
             )
             similarity_threshold = gr.Slider(
-                minimum=-1.0,
+                minimum=0.5,
                 maximum=1.0,
-                value=0.75,
+                value=0.8,
                 step=0.01,
                 label="Similarity threshold",
                 info=(
