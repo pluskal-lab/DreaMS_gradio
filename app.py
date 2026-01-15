@@ -179,8 +179,9 @@ def _crop_transparent_edges(img: Image.Image) -> Image.Image:
 
 def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
     """
-    Convert SMILES string to HTML image for display in Gradio dataframe
-    Uses caching to avoid regenerating the same molecule images
+    Convert SMILES string to HTML image for display in Gradio dataframe.
+    Uses caching to avoid regenerating the same molecule images.
+    Ensures the molecule is shown on a white background (not transparent), but does not change (expand) the molecule's bounding box.
     
     Args:
         smiles: SMILES string representation of molecule
@@ -208,25 +209,33 @@ def smiles_to_html_img(smiles, img_size=SMILES_IMG_SIZE):
         opts.clearBackground = False
         opts.padding = 0.05  # Minimal padding
         opts.bondLineWidth = 1.5  # Reduced from 2.0 for smaller images
-        
+
         # Draw the molecule
         d2d.DrawMolecule(mol)
         d2d.FinishDrawing()
-        
-        # Get PNG data and convert to PIL Image
+
+        # Get PNG data and convert to PIL Image (will have transparency)
         png_data = d2d.GetDrawingText()
         img = Image.open(io.BytesIO(png_data))
-        
-        # Crop transparent edges and convert to base64
+
+        # Crop transparent edges FIRST (keeps molecule framing identical to original)
         img = _crop_transparent_edges(img)
+
+        # Create white background of same size as cropped molecule image
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])  # Use alpha channel as mask
+            img = bg.convert("RGB")
+        else:
+            img = img.convert("RGB")
+
         img_str = _convert_pil_to_base64(img)
-        
         result = f"<img src='{img_str}' style='max-width: 100%; height: auto;' title='{smiles}' />"
-        
+
         # Cache the result
         _smiles_cache[cache_key] = result
         return result
-        
+
     except Exception as e:
         result = f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
         _smiles_cache[cache_key] = result
@@ -287,7 +296,7 @@ def spectrum_to_html_img(
                 format='png',
                 bbox_inches='tight',
                 dpi=70,
-                transparent=True,
+                transparent=False,
             )
             buffered.seek(0)
             
