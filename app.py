@@ -12,11 +12,12 @@ License: MIT
 import base64
 import io
 import shutil
-from textwrap import wrap
+import threading
 import urllib.request
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from textwrap import wrap
 from typing import Any, Optional, Sequence, Tuple, Union
 
 import gradio as gr
@@ -26,6 +27,10 @@ matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+import multiprocessing
+import numpy as np
+import os
+from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
 import spaces
 from PIL import Image
@@ -47,6 +52,8 @@ from dreams.utils.dformats import assign_dformat
 # Optimized image sizes for better performance
 SMILES_IMG_SIZE = 200
 SPECTRUM_IMG_SIZE = 800  # Reduced from 1500 for faster generation
+SPECTRUM_FIGSIZE = (1.6, 0.8)
+SPECTRUM_DPI = 70
 
 # Supported input formats
 SUPPORTED_INPUT_EXTENSIONS = {'.mgf', '.mzml', '.hdf5'}
@@ -133,6 +140,10 @@ _REF_MZ_VALUE_STYLE = "font-variant-numeric:tabular-nums;font-weight:500;"
 
 # Cache for SMILES images to avoid regeneration
 _smiles_cache = {}
+_spectrum_lock = threading.Lock()
+_spectrum_fig = plt.figure(figsize=SPECTRUM_FIGSIZE, dpi=SPECTRUM_DPI)
+_spectrum_canvas = FigureCanvasAgg(_spectrum_fig)
+_spectrum_ax = _spectrum_fig.add_subplot(111)
 
 def clear_smiles_cache() -> None:
     """Clear the SMILES image cache to free memory"""
@@ -271,48 +282,140 @@ def _format_ref_precursor_mz_value(value: Any, analog_hit: bool) -> str:
     )
 
 
+class _SpectrumRenderFallback(Exception):
+    """Internal sentinel used to fallback to slow rendering path."""
+
+
+def _render_spectrum_image_fast(spec1: Any, spec2: Any) -> Image.Image:
+    """Render a spectrum to a PIL image using a shared matplotlib figure."""
+    with _spectrum_lock:
+        _spectrum_ax.clear()
+        try:
+            su.plot_spectrum(
+                spec=spec1,
+                mirror_spec=spec2,
+                ax=_spectrum_ax,
+                figsize=SPECTRUM_FIGSIZE,
+            )
+        except TypeError as exc:
+            # Older versions of su.plot_spectrum may not accept an axis argument.
+            raise _SpectrumRenderFallback from exc
+
+        _spectrum_canvas.draw()
+        width, height = _spectrum_canvas.get_width_height()
+        # Copy the RGBA pixel buffer to avoid referencing mutable matplotlib memory
+        rgba = np.frombuffer(_spectrum_canvas.buffer_rgba(), dtype=np.uint8).copy()
+
+    rgba = rgba.reshape((height, width, 4))
+    return Image.fromarray(rgba, mode='RGBA')
+
+
+def _render_spectrum_png_fallback(spec1: Any, spec2: Any) -> BytesIO:
+    """Fallback rendering path that mirrors the legacy behaviour."""
+    buffer = BytesIO()
+
+    su.plot_spectrum(spec=spec1, mirror_spec=spec2, figsize=SPECTRUM_FIGSIZE)
+
+    fig = plt.gcf()
+    canvas = fig.canvas
+    if not isinstance(canvas, FigureCanvasAgg):
+        canvas = FigureCanvasAgg(fig)
+        fig.set_canvas(canvas)
+
+    fig.savefig(
+        buffer,
+        format='png',
+        bbox_inches='tight',
+        dpi=SPECTRUM_DPI,
+        transparent=False,
+    )
+    plt.close(fig)
+
+    buffer.seek(0)
+    return buffer
+
+
+def _spectrum_to_html_img_single(
+    spec1: Any,
+    spec2: Any,
+    img_size: int = SPECTRUM_IMG_SIZE,
+) -> str:
+    """Render a single spectrum pair to HTML."""
+    img_buffer: Optional[BytesIO] = None
+    pil_img: Optional[Image.Image] = None
+    try:
+        try:
+            pil_img = _render_spectrum_image_fast(spec1, spec2)
+        except _SpectrumRenderFallback:
+            img_buffer = _render_spectrum_png_fallback(spec1, spec2)
+            with Image.open(img_buffer) as fallback_img:
+                fallback_img.load()
+                pil_img = fallback_img.convert('RGBA')
+
+        processed_img = _crop_transparent_edges(pil_img)
+        try:
+            img_str = _convert_pil_to_base64(processed_img)
+        finally:
+            if processed_img is not pil_img:
+                processed_img.close()
+
+        return f"<img src='{img_str}' style='max-width: 100%; height: auto;' title='Spectrum comparison' />"
+
+    except Exception as e:
+        return f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
+    finally:
+        if img_buffer is not None:
+            img_buffer.close()
+        if pil_img is not None:
+            pil_img.close()
+
+
 def spectrum_to_html_img(
     spec1: Any,
     spec2: Any,
     img_size: int = SPECTRUM_IMG_SIZE,
 ) -> str:
     """Convert a spectrum (and optional mirror spectrum) to an embeddable HTML image."""
-    try:
-        # Create the spectrum plot using DreaMS utility function
-        su.plot_spectrum(spec=spec1, mirror_spec=spec2, figsize=(1.6, 0.8))  # Reduced size for performance
+    return _spectrum_to_html_img_single(spec1, spec2, img_size)
 
-        # Render the current figure using the Agg backend
-        fig = plt.gcf()
-        canvas = fig.canvas
-        if not isinstance(canvas, FigureCanvasAgg):
-            canvas = FigureCanvasAgg(fig)
-            fig.set_canvas(canvas)
-        canvas.draw()
-        
-        # Save figure to buffer with tight layout to retain axis labels
-        with BytesIO() as buffered:
-            fig.savefig(
-                buffered,
-                format='png',
-                bbox_inches='tight',
-                dpi=70,
-                transparent=False,
-            )
-            buffered.seek(0)
-            
-            # Convert to PIL Image, crop edges, and convert to base64
-            img = Image.open(buffered)
-            img.load()
-            img = _crop_transparent_edges(img)
-            img_str = _convert_pil_to_base64(img)
-        
-        # Clean up matplotlib figure to free memory
-        plt.close(fig)
-        
-        return f"<img src='{img_str}' style='max-width: 100%; height: auto;' title='Spectrum comparison' />"
-        
-    except Exception as e:
-        return f"<div style='text-align: center; color: red;'>Error: {str(e)}</div>"
+
+def _spectrum_to_html_img_worker(args: Tuple[Any, Any]) -> str:
+    """Worker entry-point for multiprocessing rendering."""
+    spec1, spec2 = args
+    return _spectrum_to_html_img_single(spec1, spec2)
+
+
+def _render_spectra_parallel(pairs: Sequence[Tuple[Any, Any]]) -> list[str]:
+    """Render spectra in parallel using a process pool, falling back to sequential rendering on failure."""
+    total = len(pairs)
+    if total == 0:
+        return []
+
+    cpu_count = os.cpu_count() or 1
+    max_workers = max(1, cpu_count - 1)
+    print(f"Using {max_workers} workers for parallel spectrum rendering")
+    ctx = multiprocessing.get_context("spawn")
+    env_flag = "DREAMS_SKIP_SETUP_ON_IMPORT"
+    previous_flag = os.environ.get(env_flag)
+    os.environ[env_flag] = "1"
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
+            iterator = executor.map(_spectrum_to_html_img_worker, pairs, chunksize=5)
+            return [
+                result
+                for result in tqdm(iterator, total=total, desc="Painting spectra", leave=False)
+            ]
+    except Exception as exc:
+        print(f"Parallel spectrum rendering failed ({exc}); falling back to sequential mode.")
+        return [
+            _spectrum_to_html_img_single(spec1, spec2)
+            for spec1, spec2 in tqdm(pairs, total=total, desc="Painting spectra (fallback)", leave=False)
+        ]
+    finally:
+        if previous_flag is None:
+            os.environ.pop(env_flag, None)
+        else:
+            os.environ[env_flag] = previous_flag
 
 
 # =============================================================================
@@ -536,10 +639,14 @@ def _predict_core(
                 df[col] = rendered_smiles
 
         progress(0.9, desc="Painting spectra...")
-        df[SPECTRUM] = [
-            spectrum_to_html_img(query, ref)
-            for query, ref in tqdm(zip(df[SPECTRUM], df[f'ref_{SPECTRUM}']), desc="Painting spectra", total=len(df))
-        ]
+        spectrum_pairs = list(zip(df[SPECTRUM], df[f'ref_{SPECTRUM}']))
+        if len(spectrum_pairs) > 1000:
+            df[SPECTRUM] = _render_spectra_parallel(spectrum_pairs)
+        else:
+            df[SPECTRUM] = [
+                spectrum_to_html_img(query, ref)
+                for query, ref in tqdm(spectrum_pairs, desc="Painting spectra", total=len(spectrum_pairs))
+            ]
         
         print('Columns:')
         print(df.columns)
@@ -805,5 +912,6 @@ if __name__ == "__main__":
     app = _create_gradio_interface()
     app.launch(allowed_paths=['./assets'])
 else:
-    # When imported as a module, just run setup
-    setup()
+    # When imported as a module, run setup unless explicitly skipped
+    if os.environ.get("DREAMS_SKIP_SETUP_ON_IMPORT") != "1":
+        setup()
