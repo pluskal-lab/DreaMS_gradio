@@ -608,7 +608,7 @@ def predict(
             headers=headers,
             datatype=datatype,
             column_widths=column_widths,
-            column_count=(len(headers), "fixed"),
+            col_count=(len(headers), "fixed"),
         )
 
         if isinstance(df_raw, pd.DataFrame) and df_raw.empty:
