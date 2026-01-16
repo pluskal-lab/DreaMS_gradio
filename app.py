@@ -56,7 +56,7 @@ SPECTRUM_FIGSIZE = (1.6, 0.8)
 SPECTRUM_DPI = 70
 
 # Supported input formats
-SUPPORTED_INPUT_EXTENSIONS = {'.mgf', '.mzml', '.hdf5'}
+SUPPORTED_INPUT_EXTENSIONS = {'.mgf', '.mzml', '.mzxml', '.hdf5'}
 
 # Library and data paths
 LIBRARY_PATH = Path("DreaMS/data/MassSpecGym_DreaMS.hdf5")
@@ -392,7 +392,7 @@ def _render_spectra_parallel(pairs: Sequence[Tuple[Any, Any]]) -> list[str]:
         return []
 
     cpu_count = os.cpu_count() or 1
-    max_workers = max(1, min(cpu_count - 1, 8))
+    max_workers = max(1, min(cpu_count - 1, 2))
     print(f"Using {max_workers} workers for parallel spectrum rendering")
     ctx = multiprocessing.get_context("spawn")
     env_flag = "DREAMS_SKIP_SETUP_ON_IMPORT"
@@ -702,7 +702,7 @@ def predict(
     try:
         # Validate input file
         if not _validate_input_file(in_pth):
-            raise gr.Error("Invalid input file. Please provide a valid .mgf, .mzML, or .hdf5 file.")
+            raise gr.Error("Invalid input file. Please provide a valid .mgf, .mzML, .mzXML, or .hdf5 file.")
         
         # Check if library exists
         if not Path(lib_pth).exists():
@@ -799,7 +799,7 @@ def _create_gradio_interface() -> gr.Blocks:
         with gr.Row(equal_height=True):
             in_pth = gr.File(
                 file_count="single",
-                label="Input MS/MS file (.mgf, .mzML, .hdf5)",
+                label="Input MS/MS file (.mgf, .mzML, .mzXML, .hdf5)",
             )
 
         # Example files
@@ -816,7 +816,7 @@ def _create_gradio_interface() -> gr.Blocks:
         with gr.Accordion("⚙️ Settings", open=False):
             lib_pth = gr.File(
                 file_count="single",
-                label="Reference MS/MS file or spectral library (.mgf, .mzML, .hdf5)",
+                label="Reference MS/MS file or spectral library (.mgf, .mzML, .mzXML, .hdf5)",
                 value=str(LIBRARY_PATH),
                 interactive=True,
                 visible=True,
