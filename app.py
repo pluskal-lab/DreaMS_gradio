@@ -392,7 +392,7 @@ def _render_spectra_parallel(pairs: Sequence[Tuple[Any, Any]]) -> list[str]:
         return []
 
     cpu_count = os.cpu_count() or 1
-    max_workers = max(1, min(cpu_count - 1, 16))
+    max_workers = max(1, min(cpu_count - 1, 8))
     print(f"Using {max_workers} workers for parallel spectrum rendering")
     ctx = multiprocessing.get_context("spawn")
     env_flag = "DREAMS_SKIP_SETUP_ON_IMPORT"
