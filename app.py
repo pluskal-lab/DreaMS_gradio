@@ -538,7 +538,7 @@ def _filter_input_data(
                 if charge > 1 or charge < -1:  # -1 if often used for unknown charge?
                     continue
         if only_high_quality_spectra:
-            if assign_dformat(msdata.get_values(SPECTRUM, i), msdata.get_values(PRECURSOR_MZ, i)) != 'A':
+            if assign_dformat(su.unpad_peak_list(msdata.get_values(SPECTRUM, i)), msdata.get_values(PRECURSOR_MZ, i)) != 'A':
                 continue
         idx.append(i)
 
