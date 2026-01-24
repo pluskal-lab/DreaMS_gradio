@@ -1,3 +1,3 @@
-dreams @ git+https://github.com/pluskal-lab/DreaMS.git@5c972bb969dcb6b6160d846ab322ddc44d8df521
+dreams @ git+https://github.com/pluskal-lab/DreaMS.git@02be141a2dd101e132a835ba6fea414048564a28
 gradio==6.3.0
 # spaces
