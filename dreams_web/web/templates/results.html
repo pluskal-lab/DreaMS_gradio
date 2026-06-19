@@ -4,8 +4,7 @@
 </p>
 {% if result.display_rows %}
 <p>
-  <a class="download" download="dreams_hits.tsv"
-     href="data:text/tab-separated-values;base64,{{ tsv_b64 }}">⬇ Download all results (TSV)</a>
+  <a class="download" href="/jobs/{{ job.job_id }}/download">⬇ Download all results (TSV)</a>
 </p>
 <table>
   <thead>

@@ -172,3 +172,6 @@ class JobQueue:
             _logger.exception("job %s failed", job_id)
             job.error = "Could not process the spectra. Please check the file."
             job.status = JobStatus.FAILED
+        finally:
+            # The result is in memory; free the on-disk working files immediately.
+            rmtree(job.work_dir, ignore_errors=True)

@@ -1,0 +1,4 @@
+<div id="results-inner" hx-get="/jobs/{{ job.job_id }}" hx-trigger="load delay:1s"
+     hx-swap="outerHTML" hx-target="this">
+  <p class="pending"><span class="spinner"></span>{{ job.status.value|capitalize }}… (job {{ job.job_id[:8] }})</p>
+</div>

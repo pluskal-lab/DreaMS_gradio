@@ -30,7 +30,7 @@
     Upload an MS/MS file (.mgf, .mzML, .mzXML, .hdf5) to identify molecules by matching
     against the MassSpecGym spectral library with DreaMS embeddings.
   </p>
-  <form hx-post="/annotate" hx-target="#results" hx-encoding="multipart/form-data"
+  <form hx-post="/jobs" hx-target="#results" hx-encoding="multipart/form-data"
         hx-indicator="#spin" hx-disabled-elt="find button">
     <input type="file" name="file" required>
     <button type="submit">Run DreaMS</button>

@@ -42,8 +42,12 @@ def load_spectra(path: Path) -> MSData:
     Returns:
         MSData: The loaded spectra (non-HDF5 inputs are auto-converted to HDF5).
     """
-    # Append mode lets the search step store query embeddings into the object.
-    return MSData.load(path, in_mem=True, mode="a")
+    try:
+        # Append mode lets the search step store query embeddings into the object.
+        return MSData.load(path, in_mem=True, mode="a")
+    except Exception as exc:
+        # Untrusted upload: surface any parse failure as a clean input error.
+        raise InvalidInputError("Could not parse the file as MS/MS spectra.") from exc
 
 
 def filter_high_quality(spectra: MSData, out_path: Path) -> MSData:
