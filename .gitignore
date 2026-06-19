@@ -149,3 +149,9 @@ __pycache__
 *ckpt
 *pt
 *lightning_logs*
+
+# DreaMS web service: data + temp job store (never commit)
+data/
+*.hdf5
+.ruff_cache/
+jobs/

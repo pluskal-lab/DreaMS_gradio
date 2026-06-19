@@ -1,0 +1,27 @@
+name: dreams-web CI
+
+# Runs the web-layer checks on the fastapi-webapp branch (CPU only, no DreaMS/torch).
+on:
+  push:
+    branches: [fastapi-webapp]
+  pull_request:
+    branches: [fastapi-webapp]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (web layer + dev tools)
+        run: pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check dreams_web tests
+      - name: Black
+        run: black --check dreams_web tests
+      - name: Mypy
+        run: mypy dreams_web
+      - name: Pytest
+        run: pytest -q
