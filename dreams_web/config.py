@@ -21,6 +21,7 @@ class Settings:
     max_spectra: int = 50_000
     job_retention_seconds: int = 24 * 3600
     job_store_max_bytes: int = 30 * 1024 * 1024 * 1024
+    max_queued_jobs: int = 32
     jobs_dir: Path = Path("/tmp/jozefov/dreams_inference/jobs")
     reference_library: Path = Path("data/MassSpecGym_DreaMS.hdf5")
     examples_dir: Path = Path("data/examples")
