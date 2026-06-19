@@ -42,7 +42,8 @@ def load_spectra(path: Path) -> MSData:
     Returns:
         MSData: The loaded spectra (non-HDF5 inputs are auto-converted to HDF5).
     """
-    return MSData.load(path, in_mem=True)
+    # Append mode lets the search step store query embeddings into the object.
+    return MSData.load(path, in_mem=True, mode="a")
 
 
 def filter_high_quality(spectra: MSData, out_path: Path) -> MSData:
@@ -75,4 +76,5 @@ def filter_high_quality(spectra: MSData, out_path: Path) -> MSData:
 
     if not keep:
         raise EmptyResultError("No spectra passed the single-charge / quality filters.")
-    return spectra.form_subset(idx=keep, out_pth=out_path)
+    # Append mode + in-memory so the search step can store embeddings into the subset.
+    return spectra.form_subset(idx=keep, out_pth=out_path, mode="a", in_mem=True)

@@ -47,5 +47,12 @@ disallow_untyped_defs = true
 warn_unused_ignores = true
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# pandas crosses the untyped DreaMS boundary; don't deep-check its stubs here.
+module = ["pandas", "pandas.*"]
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: integration test needing the DreaMS model (skipped by default)"]
+addopts = "-m 'not slow'"
