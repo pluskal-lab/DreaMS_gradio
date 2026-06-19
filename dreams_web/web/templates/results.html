@@ -4,16 +4,27 @@
 </p>
 {% if result.display_rows %}
 <p>
-  <a download="dreams_hits.tsv"
-     href="data:text/tab-separated-values;base64,{{ tsv_b64 }}">Download TSV</a>
+  <a class="download" download="dreams_hits.tsv"
+     href="data:text/tab-separated-values;base64,{{ tsv_b64 }}">⬇ Download all results (TSV)</a>
 </p>
 <table>
   <thead>
-    <tr>{% for col in result.display_rows[0].keys() %}<th>{{ col }}</th>{% endfor %}</tr>
+    <tr>
+      <th>Molecule</th><th>Name</th><th>Adduct</th>
+      <th>Ref&nbsp;m/z</th><th>Query&nbsp;m/z</th><th>RT</th><th>DreaMS&nbsp;sim.</th>
+    </tr>
   </thead>
   <tbody>
     {% for row in result.display_rows %}
-    <tr>{% for value in row.values() %}<td>{{ value }}</td>{% endfor %}</tr>
+    <tr>
+      <td class="mol">{{ mol_svg(row.get('ref_smiles', '')) | safe }}</td>
+      <td>{{ row.get('ref_name', '') or '—' }}</td>
+      <td>{{ row.get('ref_adduct', '') }}</td>
+      <td>{{ row.get('ref_precursor_mz', '') }}</td>
+      <td>{{ row.get('precursor_mz', '') }}</td>
+      <td>{{ row.get('RT', '') }}</td>
+      <td>{{ "%.4f"|format(row.get('DreaMS_similarity', 0)) }}</td>
+    </tr>
     {% endfor %}
   </tbody>
 </table>

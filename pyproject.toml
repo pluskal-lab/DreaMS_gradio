@@ -46,10 +46,13 @@ python_version = "3.11"
 disallow_untyped_defs = true
 warn_unused_ignores = true
 ignore_missing_imports = true
+# Apply per-module follow_imports="skip" to .pyi stubs too (rdkit-stubs is malformed).
+follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
-# pandas crosses the untyped DreaMS boundary; don't deep-check its stubs here.
-module = ["pandas", "pandas.*"]
+# pandas/rdkit cross the untyped DreaMS boundary; don't deep-check their stubs here
+# (rdkit-stubs also ships a malformed .pyi that breaks mypy).
+module = ["pandas", "pandas.*", "rdkit", "rdkit.*"]
 follow_imports = "skip"
 
 [tool.pytest.ini_options]

@@ -17,8 +17,10 @@ from dreams_web.service.annotate import annotate_upload
 from dreams_web.service.errors import DreamsWebError
 from dreams_web.service.reference_library import massspecgym_library
 from dreams_web.service.search_backend import SearchBackend
+from dreams_web.web.rendering import smiles_to_svg
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+_TEMPLATES.env.globals["mol_svg"] = smiles_to_svg
 
 
 @asynccontextmanager
