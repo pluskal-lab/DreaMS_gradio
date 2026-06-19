@@ -1,0 +1,22 @@
+<h2>Matches</h2>
+<p class="muted">
+  {{ result.n_matches }} match(es) across {{ result.n_query_spectra }} query spectrum(a).
+</p>
+{% if result.display_rows %}
+<p>
+  <a download="dreams_hits.tsv"
+     href="data:text/tab-separated-values;base64,{{ tsv_b64 }}">Download TSV</a>
+</p>
+<table>
+  <thead>
+    <tr>{% for col in result.display_rows[0].keys() %}<th>{{ col }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+    {% for row in result.display_rows %}
+    <tr>{% for value in row.values() %}<td>{{ value }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No matches found above the similarity threshold.</p>
+{% endif %}

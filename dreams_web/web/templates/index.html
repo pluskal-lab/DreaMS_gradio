@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DreaMS — spectral library matching</title>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { color: #173797; }
+    .muted { color: #666; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 14px; }
+    th { background: #173797; color: #fff; }
+    button { background: #173797; color: #fff; border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>DreaMS</h1>
+  <p class="muted">
+    Upload an MS/MS file (.mgf, .mzML, .mzXML, .hdf5) to identify molecules by matching
+    against the MassSpecGym spectral library with DreaMS embeddings.
+  </p>
+  <form hx-post="/annotate" hx-target="#results" hx-encoding="multipart/form-data" hx-indicator="#spin">
+    <input type="file" name="file" required>
+    <button type="submit">Run DreaMS</button>
+    <span id="spin" class="htmx-indicator muted">Running…</span>
+  </form>
+  <div id="results"></div>
+</body>
+</html>
