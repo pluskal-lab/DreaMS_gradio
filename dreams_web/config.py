@@ -23,6 +23,7 @@ class Settings:
     job_store_max_bytes: int = 30 * 1024 * 1024 * 1024
     jobs_dir: Path = Path("/tmp/jozefov/dreams_inference/jobs")
     reference_library: Path = Path("data/MassSpecGym_DreaMS.hdf5")
+    examples_dir: Path = Path("data/examples")
 
 
 DEFAULT_SETTINGS = Settings()

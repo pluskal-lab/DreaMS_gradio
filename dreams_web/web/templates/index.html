@@ -15,11 +15,13 @@
     th { background: #173797; color: #fff; white-space: nowrap; }
     td.mol svg { display: block; }
     button { background: #173797; color: #fff; border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    button:disabled { opacity: .5; cursor: progress; }
+    .examples { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; }
+    .examples button { background: #fff; color: #173797; border: 1px solid #173797; }
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccd; border-top-color: #173797; border-radius: 50%; animation: spin .7s linear infinite; margin-right: 8px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .htmx-indicator { display: none; margin-left: 12px; color: #173797; }
-    form.htmx-request .htmx-indicator { display: inline-flex; align-items: center; }
-    form.htmx-request button { opacity: .5; cursor: progress; }
+    .htmx-indicator { display: none; }
+    .htmx-indicator.htmx-request { display: inline-flex; align-items: center; margin-top: 12px; color: #173797; }
   </style>
 </head>
 <body>
@@ -29,11 +31,18 @@
     against the MassSpecGym spectral library with DreaMS embeddings.
   </p>
   <form hx-post="/annotate" hx-target="#results" hx-encoding="multipart/form-data"
-        hx-indicator="this" hx-disabled-elt="find button">
+        hx-indicator="#spin" hx-disabled-elt="find button">
     <input type="file" name="file" required>
     <button type="submit">Run DreaMS</button>
-    <span class="htmx-indicator"><span class="spinner"></span>Running DreaMS… this can take a few seconds.</span>
   </form>
+  <p class="muted" style="margin-bottom: 2px;">…or try a prepared example:</p>
+  <div class="examples">
+    {% for ex in examples %}
+    <button hx-post="/examples/{{ ex.example_id }}" hx-target="#results"
+            hx-indicator="#spin" hx-disabled-elt="this">{{ ex.label }}</button>
+    {% endfor %}
+  </div>
+  <div id="spin" class="htmx-indicator"><span class="spinner"></span>Running DreaMS… this can take a few seconds.</div>
   <div id="results"></div>
 </body>
 </html>
