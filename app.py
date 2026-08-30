@@ -32,6 +32,25 @@ import numpy as np
 import os
 from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
+
+# ---------------------------------------------------------------------------
+# ZeroGPU cgroup workaround -- MUST run before `import spaces`.
+# ---------------------------------------------------------------------------
+# When a `@spaces.GPU` function is invoked, the `spaces` scheduler reads a
+# cgroup file to attribute the GPU to this Space's process. The path comes from
+# the ``ZEROGPU_PROC_SELF_CGROUP_PATH`` env var (default ``/proc/self/cgroup``).
+# Some Hugging Face ZeroGPU runtimes point this at a bind-mounted host cgroup
+# file (e.g. ``/etc/host-cgroup``) that is intermittently missing from the
+# running container. When it is absent, every GPU call fails with
+# ``FileNotFoundError: [Errno 2] No such file or directory: '/etc/host-cgroup'``
+# and the app cannot run. Fall back to the library's own default
+# ``/proc/self/cgroup`` (which always exists on Linux) when the configured file
+# is not present, so GPU scheduling can still proceed.
+# Ref: https://discuss.huggingface.co/t/anyone-else-having-trouble-getting-a-zerogpu-allocation-reservation/179125
+_zerogpu_cgroup_path = os.environ.get("ZEROGPU_PROC_SELF_CGROUP_PATH", "/proc/self/cgroup")
+if not os.path.exists(_zerogpu_cgroup_path):
+    os.environ["ZEROGPU_PROC_SELF_CGROUP_PATH"] = "/proc/self/cgroup"
+
 import spaces
 from PIL import Image
 from rdkit import Chem
